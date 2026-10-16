@@ -48,7 +48,7 @@ struct Automatic {
 struct Inner {
     revision: u64,
     usage: Vec<AccountUsage>,
-    reading: bool,
+    reads: duty::Reads,
     updated_at: Option<i64>,
     installed: Vec<(ProviderId, bool)>,
     snapshot: Option<Snapshot>,
@@ -104,7 +104,7 @@ pub fn refresh(app: &AppHandle) {
         (
             inner.revision,
             inner.usage.clone(),
-            inner.reading,
+            inner.reads.busy(),
             inner.updated_at,
             inner.installed.clone(),
             inner.warm.clone(),
@@ -164,31 +164,72 @@ pub fn quit(app: &AppHandle) {
 /// Ask Anthropic and OpenAI for every account's usage, off the calling
 /// thread; a read already under way is not started twice.
 pub fn read_usage(app: &AppHandle) {
-    {
+    read(app, false);
+}
+
+/// [`read_usage`] even right after another read: an account just added has
+/// no reading at all.
+pub fn read_usage_now(app: &AppHandle) {
+    read(app, true);
+}
+
+/// Ask for a read; [`duty::Reads`] says when it happens.
+fn read(app: &AppHandle, now_anyway: bool) {
+    let plan = {
         let state = app.state::<AppState>();
         let Ok(mut inner) = state.inner.lock() else {
             return;
         };
-        if inner.reading {
-            return;
+        inner.reads.ask(now_anyway, now())
+    };
+    follow(app, plan);
+}
+
+fn follow(app: &AppHandle, plan: duty::ReadPlan) {
+    match plan {
+        duty::ReadPlan::Nothing => {}
+        duty::ReadPlan::Start => start_read(app),
+        duty::ReadPlan::WaitUntil(due) => {
+            let later = app.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_secs((due - now()).max(0) as u64));
+                let plan = {
+                    let state = later.state::<AppState>();
+                    let Ok(mut inner) = state.inner.lock() else {
+                        return;
+                    };
+                    inner.reads.turn_came(due, now())
+                };
+                follow(&later, plan);
+            });
+            // Refresh spins while the read waits for its turn.
+            refresh(app);
         }
-        inner.reading = true;
     }
+}
+
+/// Read every account's usage, off the calling thread.
+fn start_read(app: &AppHandle) {
     let app = app.clone();
     std::thread::spawn(move || {
         refresh(&app);
-        let read = engine().usage(&Http::new());
-        {
+        // However the read ends, the next one may start.
+        let read_now = std::panic::catch_unwind(|| engine().usage(&Http::new()));
+        let plan = {
             let state = app.state::<AppState>();
-            if let Ok(mut inner) = state.inner.lock() {
-                inner.reading = false;
-                if let Ok(usage) = read {
-                    inner.usage = duty::keep_last_good(&inner.usage, usage);
-                    inner.updated_at = Some(now());
-                }
+            let Ok(mut inner) = state.inner.lock() else {
+                return;
             };
-        }
+            if let Ok(Ok(usage)) = read_now {
+                let (usage, updated_at) =
+                    duty::merge_read(&inner.usage, inner.updated_at, usage, now());
+                inner.usage = usage;
+                inner.updated_at = updated_at;
+            }
+            inner.reads.ended(now())
+        };
         refresh(&app);
+        follow(&app, plan);
         run_duties(&app);
     });
 }
@@ -208,11 +249,47 @@ pub fn run_duties(app: &AppHandle) {
     }
     let app = app.clone();
     std::thread::spawn(move || {
-        duties(&app);
-        app.state::<AppState>()
-            .duties
-            .store(false, Ordering::SeqCst);
+        let finished =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| duties(&app))).is_ok();
+        end_round(&app, finished);
     });
+}
+
+/// Ends a round of duties however it ended, a panic included: the next round
+/// may start, and no account stays shown as warming up (which keeps it from
+/// being switched to); the window is told at once.
+fn end_round(app: &AppHandle, finished: bool) {
+    let state = app.state::<AppState>();
+    let mut stuck = false;
+    if !finished {
+        // A panic while the state was held must not stop the app updating.
+        state.inner.clear_poison();
+    }
+    {
+        let mut inner = state.inner.lock().unwrap_or_else(|e| e.into_inner());
+        for w in &mut inner.warm {
+            if w.standing == WarmStanding::Warming {
+                w.standing = WarmStanding::Due;
+                stuck = true;
+            }
+        }
+    }
+    state.duties.store(false, Ordering::SeqCst);
+    if stuck || !finished {
+        refresh(app);
+    }
+}
+
+/// Whether `name`'s login is lent to a warm-up right now: a switch to it
+/// would put in use a login being renewed.
+pub fn warming(app: &AppHandle, provider: ProviderId, name: &str) -> bool {
+    provider == ProviderId::ClaudeCode
+        && app.state::<AppState>().inner.lock().is_ok_and(|inner| {
+            inner
+                .warm
+                .iter()
+                .any(|w| w.name == name && w.standing == WarmStanding::Warming)
+        })
 }
 
 fn duties(app: &AppHandle) {
@@ -313,6 +390,22 @@ fn local_day() -> (String, u32) {
     )
 }
 
+/// Show where one account's warm-up stands as soon as it changes: warming
+/// up while it runs (a parked account can't be switched to meanwhile, and the
+/// window says why), what came of it right after.
+fn show_warm(app: &AppHandle, judged: WarmState) {
+    {
+        let state = app.state::<AppState>();
+        if let Ok(mut inner) = state.inner.lock() {
+            match inner.warm.iter_mut().find(|w| w.name == judged.name) {
+                Some(w) => *w = judged,
+                None => inner.warm.push(judged),
+            }
+        };
+    }
+    refresh(app);
+}
+
 fn warm_ups(
     app: &AppHandle,
     host: &RealHost,
@@ -344,6 +437,14 @@ fn warm_ups(
         let mut standing = duty::warm_standing(account, &warmed, expired, in_span, at);
         if standing == WarmStanding::Due {
             if let (Some(program), Some(token)) = (program.as_ref(), token.as_ref()) {
+                show_warm(
+                    app,
+                    WarmState {
+                        name: account.name.clone(),
+                        standing: WarmStanding::Warming,
+                        warmed_at: warmed.started,
+                    },
+                );
                 let outcome = if account.in_use {
                     Some(warm::run(program, &token.access, &search))
                 } else {
@@ -357,11 +458,13 @@ fn warm_ups(
                     still_parked.then(|| warm::run_parked(host, &account.name, program, &search))
                 };
                 let Some(outcome) = outcome else {
-                    judged.push(WarmState {
+                    let unchanged = WarmState {
                         name: account.name.clone(),
                         standing,
                         warmed_at: warmed.started,
-                    });
+                    };
+                    show_warm(app, unchanged.clone());
+                    judged.push(unchanged);
                     continue;
                 };
                 // A parked login may be renewed even when the warm-up failed.
@@ -384,6 +487,14 @@ fn warm_ups(
                 );
                 ledger.insert(account.name.clone(), warmed.clone());
                 standing = duty::warm_standing(account, &warmed, expired, in_span, now());
+                show_warm(
+                    app,
+                    WarmState {
+                        name: account.name.clone(),
+                        standing: standing.clone(),
+                        warmed_at: warmed.started,
+                    },
+                );
             }
         }
         judged.push(WarmState {

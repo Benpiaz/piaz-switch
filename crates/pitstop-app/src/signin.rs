@@ -223,7 +223,7 @@ fn watch(
         Ok(()) => {
             let _ = app.emit("sign-in", event("done", &said, None));
             app::refresh(app);
-            app::read_usage(app);
+            app::read_usage_now(app);
         }
         Err(error) => {
             let _ = app.emit("sign-in", event("failed", &said, Some(error)));

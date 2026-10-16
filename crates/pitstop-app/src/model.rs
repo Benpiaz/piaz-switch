@@ -122,6 +122,9 @@ pub enum UsageView {
     Unauthorized,
     Failed {
         message: String,
+        /// The service turned the read away for coming too often.
+        #[serde(rename = "rateLimited")]
+        rate_limited: bool,
     },
 }
 
@@ -349,6 +352,7 @@ impl From<&UsageReport> for UsageView {
             UsageReport::Unauthorized => UsageView::Unauthorized,
             UsageReport::Failed(message) => UsageView::Failed {
                 message: message.clone(),
+                rate_limited: message == pitstop_core::usage::RATE_LIMITED,
             },
         }
     }
@@ -566,6 +570,17 @@ mod tests {
     use pitstop_core::provider::claude_code::ClaudeCode;
     use pitstop_core::testing::FakeHost;
     use pitstop_core::usage::{Usage, Window};
+
+    #[test]
+    fn a_read_turned_away_for_coming_too_often_says_so_to_the_window() {
+        let view = |message: &str| {
+            serde_json::to_value(UsageView::from(&UsageReport::Failed(message.into()))).unwrap()
+        };
+        let turned_away = view(pitstop_core::usage::RATE_LIMITED);
+        assert_eq!(turned_away["status"], "failed");
+        assert_eq!(turned_away["rateLimited"], true);
+        assert_eq!(view("network: offline")["rateLimited"], false);
+    }
 
     const TOKEN_A: &str = "SECRET-TOKEN-AAA";
     const TOKEN_B: &str = "SECRET-TOKEN-BBB";

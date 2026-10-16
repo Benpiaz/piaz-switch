@@ -42,6 +42,9 @@ pub enum UsageReport {
     Failed(String),
 }
 
+/// What a read the service turned away for coming too often came to.
+pub const RATE_LIMITED: &str = "rate limited, try again later";
+
 #[derive(Debug)]
 pub enum FetchError {
     Unauthorized,
@@ -95,7 +98,7 @@ fn answer(
                 .map_err(|e| FetchError::Other(format!("unreadable answer: {e}")))
         }
         401 | 403 => Err(FetchError::Unauthorized),
-        429 => Err(FetchError::Other("rate limited, try again later".into())),
+        429 => Err(FetchError::Other(RATE_LIMITED.into())),
         status => Err(FetchError::Other(format!("{service} answered {status}"))),
     }
 }

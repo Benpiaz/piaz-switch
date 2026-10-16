@@ -185,6 +185,8 @@ const STRINGS = {
     warmOff: "Off",
     warmJudging: "Checking…",
     warmDue: "Starting soon",
+    warmWarming: "Warming up now…",
+    useAfterWarm: "Its warm-up is running; switch when it ends",
     warmRunning: "Period runs until {time}",
     warmOutside: "Outside the hours above",
     warmNoReading: "Usage not read yet",
@@ -216,6 +218,7 @@ const STRINGS = {
     aboutAdding: "Add accounts with Add Account rather than with /login or codex login, and don’t log out in the tools: logging out ends the login Piaz Switch parked.",
     // errors the window words itself; {name} is the account an error is about
     err: {
+      warmingUp: "{name} is warming up. Switch to it when the warm-up ends, in a few seconds.",
       alreadyEnrolled: "This login is already in Piaz Switch as {name}. Sign in to a different account to add it.",
       wrongAccount: "That sign-in was a different account. Sign in as {name}’s account.",
       duplicateAccount: "{name} is already taken for this tool. Choose another name.",
@@ -400,6 +403,8 @@ const STRINGS = {
     warmOff: "Tắt",
     warmJudging: "Đang kiểm tra…",
     warmDue: "Sắp chạy",
+    warmWarming: "Đang warm-up…",
+    useAfterWarm: "Đang warm-up tài khoản này; chờ xong rồi chuyển",
     warmRunning: "Khung đang chạy tới {time}",
     warmOutside: "Ngoài khung giờ ở trên",
     warmNoReading: "Chưa đọc được usage",
@@ -429,6 +434,7 @@ const STRINGS = {
     aboutPrivacy: "Login đã park được mã hoá trong ~/.pitstop, khoá nằm trong keychain của hệ thống. Không có gì rời khỏi máy ngoài yêu cầu đọc usage của từng tài khoản, gửi tới chính dịch vụ đã cấp login đó, và mỗi ngày một lần tải bảng giá công khai của LiteLLM cho pane Mức dùng, không gửi gì về bạn, và khi bật Warm-up, một tin ngắn cho mỗi tài khoản được chọn gửi tới Anthropic. Log phiên của các tool chỉ được đọc trên máy này.",
     aboutAdding: "Thêm tài khoản bằng nút Thêm tài khoản, đừng dùng /login hay codex login, và đừng đăng xuất trong tool: đăng xuất sẽ huỷ login mà Piaz Switch đã park.",
     err: {
+      warmingUp: "{name} đang warm-up. Chờ vài giây cho xong rồi chuyển sang.",
       duplicateAccount: "Tên {name} đã có cho công cụ này. Hãy chọn tên khác.",
       alreadyEnrolled: "Login này đã có trong Piaz Switch với tên {name}. Hãy đăng nhập một tài khoản khác để thêm.",
       wrongAccount: "Lần đăng nhập đó là một tài khoản khác. Hãy đăng nhập đúng tài khoản {name}.",

@@ -1,5 +1,28 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- Warm-up on macOS: the parked login is lent to a private directory whose path is
+  resolved, so Claude Code finds it in the keychain and its renewed token comes
+  back to the vault.
+- While a parked account is being warmed up, its row says so, and switching to it
+  (the **Use** button, Enter, the row menu, a suggestion or the tray menu) says to
+  wait a few seconds instead of hanging without a word.
+- Each account's warm-up status updates as soon as its own warm-up ends, and a round
+  of warm-ups that fails midway no longer leaves an account shown as warming up.
+- "Token expired · the warm-up renews it" is no longer shown when the warm-up
+  can't run for that account (login refused, or three failed tries today).
+- A usage reading kept through a failed read (rate limited, offline) stands in for
+  at most 15 minutes, and "Updated at" keeps the time of the reading actually
+  shown, so old numbers no longer look fresh.
+- A usage read asked for less than 30 seconds after the last one is postponed
+  rather than dropped: Refresh, Try Again and the reads after a switch or a
+  warm-up always happen, and Refresh spins while one waits its turn. A newly
+  added account is still read right away.
+- Coming back to the window rereads usage at most once a minute, also while the
+  usage service is turning reads away.
+
 ## [0.2.0] - 2026-10-16
 
 ### Added

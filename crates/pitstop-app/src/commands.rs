@@ -68,6 +68,13 @@ pub fn switch(
     name: &str,
     replace_unmanaged: bool,
 ) -> Answer<Switched> {
+    if app::warming(app, pid, name) {
+        return Err(UiError {
+            code: "warmingUp",
+            message: format!("{name} is warming up; switch when it ends"),
+            name: Some(name.to_owned()),
+        });
+    }
     let state = app.state::<AppState>();
     let outcome = {
         let _op = state.ops.lock();
@@ -132,7 +139,7 @@ pub async fn name_account(app: AppHandle, provider: String, name: String) -> Ans
         };
         app::refresh(&app);
         enrolled.map_err(|e| UiError::from(&e))?;
-        app::read_usage(&app);
+        app::read_usage_now(&app);
         Ok(())
     })
     .await

@@ -15,7 +15,8 @@ use std::time::{Duration, Instant};
 
 use pitstop_core::engine::vault_id;
 use pitstop_core::provider::claude_code::ClaudeCode;
-use pitstop_core::provider::{provider_for, Provider};
+use pitstop_core::provider::provider_for;
+use pitstop_core::signin::PrivateDir;
 use pitstop_core::{vault, Host, ProviderId};
 use serde_json::Value;
 
@@ -174,18 +175,19 @@ pub fn verdict(exit: Option<i32>, stdout: &str) -> Result<(), Failure> {
     }
 }
 
-fn new_dir() -> Result<PathBuf, Failure> {
-    let dir = std::env::temp_dir().join(format!("piaz-warm-{}-{}", std::process::id(), nanos()));
-    std::fs::create_dir_all(&dir).map_err(|e| Failure::Failed(e.to_string()))?;
-    Ok(dir)
+/// A fresh directory only this user can read, removed when dropped with
+/// whatever a run left outside it (Claude Code's keychain item on macOS). Its
+/// path is resolved, so the keychain item Claude Code names after it is the
+/// one [`ClaudeCode::lend`] made.
+fn new_dir() -> Result<PrivateDir, Failure> {
+    PrivateDir::create_for(ProviderId::ClaudeCode, "warm")
+        .map_err(|e| Failure::Failed(e.to_string()))
 }
 
 /// Run one warm-up with `token`, in a directory made for it and removed after.
 pub fn run(program: &Path, token: &str, search: &[PathBuf]) -> Result<(), Failure> {
     let dir = new_dir()?;
-    let outcome = run_in(program, &dir, Some(token), search);
-    let _ = std::fs::remove_dir_all(&dir);
-    outcome
+    run_in(program, dir.path(), Some(token), search)
 }
 
 /// Run one warm-up of the parked account `name` with its whole login, lent to
@@ -203,26 +205,17 @@ pub fn run_parked(
     let dir = new_dir()?;
     let claude = ClaudeCode::for_this_os();
     let mut outcome = claude
-        .lend(host, &dir, &blob)
+        .lend(host, dir.path(), &blob)
         .map_err(|e| Failure::Failed(e.to_string()))
-        .and_then(|()| run_in(program, &dir, None, search));
-    if let Ok(Some(renewed)) = claude.renewed(host, &dir, &blob) {
+        .and_then(|()| run_in(program, dir.path(), None, search));
+    if let Ok(Some(renewed)) = claude.renewed(host, dir.path(), &blob) {
         if let Err(e) = vault::store(host, &id, &renewed) {
             outcome = Err(Failure::Failed(format!(
                 "couldn't keep the renewed login: {e}"
             )));
         }
     }
-    let _ = claude.discard_signed_in(host, &dir);
-    let _ = std::fs::remove_dir_all(&dir);
     outcome
-}
-
-fn nanos() -> u128 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0)
 }
 
 fn run_in(

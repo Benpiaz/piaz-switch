@@ -142,9 +142,10 @@ function leave(el, ms) {
 
 let toastEl = null;
 
-function toast(text) {
+/** A brief note at the bottom; `iconName` says what kind (a check by default). */
+function toast(text, iconName) {
   if (toastEl) toastEl.remove();
-  const el = h("div", { class: "toast", "aria-hidden": "true" }, icon("check"), text);
+  const el = h("div", { class: "toast", "aria-hidden": "true" }, icon(iconName || "check"), text);
   toastEl = el;
   document.body.append(el);
   announce(text);
@@ -552,7 +553,14 @@ function sideOf(tool, account) {
   if (account.usage && account.usage.status === "unauthorized") {
     return button(t("signInAgain"), () => openSignInAgain(tool, account), "compact");
   }
-  return button(t("use"), () => useAccount(tool, account), "compact");
+  const use = button(t("use"), () => useAccount(tool, account), "compact");
+  // Its login is lent to a warm-up that may renew it: a switch waits for it.
+  const warm = warmOf(tool, account);
+  if (warm && warm.standing && warm.standing.state === "warming") {
+    use.disabled = true;
+    use.title = t("useAfterWarm");
+  }
+  return use;
 }
 
 /** One line per limit: name, bar with the even-pace tick, figure, timing. */
@@ -631,13 +639,15 @@ function notesOf(tool, account) {
   const usage = account.usage;
   const warm = warmOf(tool, account);
   if (usage && usage.status === "expired" && !account.inUse) {
-    const text = warm ? t("tokenExpiredWarm") : t("tokenExpired", { tool: tool.name });
+    // Only a warm-up that is still going to run renews the token.
+    const stuck = warm && warm.standing && ["loginExpired", "loginRefused", "gaveUp"].includes(warm.standing.state);
+    const text = warm && !stuck ? t("tokenExpiredWarm") : t("tokenExpired", { tool: tool.name });
     chips.push(h("span", { class: "chip" }, icon("clock"), h("span", { text })));
   }
   if (usage && usage.status === "unauthorized") chips.push(h("span", { class: "chip warn" }, icon("warning"), h("span", { text: t("unauthorized") })));
   if (usage && usage.status === "failed") {
     // The usage service turning reads away for a while is not a fault: say so plainly.
-    const text = /rate limited/i.test(usage.message) ? t("usageRateLimited") : t("usageFailed", { message: usage.message });
+    const text = usage.rateLimited ? t("usageRateLimited") : t("usageFailed", { message: usage.message });
     chips.push(h("span", { class: "chip warn" }, icon("warning"), h("span", { text })));
   }
   if (usage && usage.status === "ok" && !usage.windows.length) chips.push(h("span", { class: "chip" }, h("span", { text: t("noLimits") })));
@@ -871,6 +881,12 @@ async function useAccount(tool, account, force) {
   if (!tool || !account) return;
   const key = rowKey(tool.id, account.name);
   if (switching.has(key)) return;
+  // Every way to switch (button, Enter, menu, suggestion) waits out a warm-up.
+  const warm = warmOf(tool, account);
+  if (warm && warm.standing && warm.standing.state === "warming") {
+    toast(t("useAfterWarm"), "clock");
+    return;
+  }
   switching.add(key);
   renderPane();
   try {
@@ -1602,6 +1618,7 @@ function warmText(row, brief) {
   let text = "";
   if (!s) text = t("warmJudging");
   else if (s.state === "due") text = t("warmDue");
+  else if (s.state === "warming") text = t("warmWarming");
   else if (s.state === "running") text = t("warmRunning", { time: clockTime(s.until) });
   else if (s.state === "outsideSpan") text = t("warmOutside");
   else if (s.state === "noReading") text = t("warmNoReading");
@@ -1742,10 +1759,16 @@ document.addEventListener("contextmenu", (event) => {
 });
 
 // Coming back to the window rereads usage when the last reading is over a
-// minute old, and only the accounts otherwise.
-window.addEventListener("focus", () =>
-  invoke("refresh", { usage: !snap || !snap.updatedAt || nowSecs() - snap.updatedAt > 60 }),
-);
+// minute old, and only the accounts otherwise. At most once a minute: while
+// reads are turned away the reading shown stays old, and asking on every
+// focus would only get more of them turned away.
+let focusReadAt = 0;
+window.addEventListener("focus", () => {
+  const stale = !snap || !snap.updatedAt || nowSecs() - snap.updatedAt > 60;
+  const usage = stale && nowSecs() - focusReadAt > 60;
+  if (usage) focusReadAt = nowSecs();
+  invoke("refresh", { usage });
+});
 window.addEventListener("blur", () => {
   closeMenu();
   hideEmails();

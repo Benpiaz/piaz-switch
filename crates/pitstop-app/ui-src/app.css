@@ -11,7 +11,8 @@
 
 /* The design tokens as Tailwind theme values: `bg-canvas`, `text-ink-2`,
    `rounded-panel`, `shadow-float`, `ease-snap`… They point at the CSS
-   variables below, so light and dark switch with the system. */
+   variables below, so light and dark switch with `data-theme` on <html>
+   (Settings → Appearance: system, light or dark). */
 @theme inline {
   --font-sans: var(--font-ui);
   --font-display: var(--font-display);
