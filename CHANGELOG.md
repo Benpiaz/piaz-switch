@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-17
+
 ### Added
 - A download page at <https://piaz-switch.vercel.app> (source in `site/`).
 - The author and the project's links (website, GitHub, YouTube @benpiaz, X
@@ -16,6 +18,9 @@
   nothing needs adding again. With the portable zip and **Open at login** on,
   turn that setting off and on again once in the new copy, so it starts
   `Piaz Switch.exe` instead of the old `pitstop-app.exe`.
+- Usage meters are easier to read: a deeper track with quarter marks, fills
+  that glow in their colour, the use ahead of an even pace striped red, a
+  clearer pace tick, a bolder figure and pace shown as a green or red pill.
 
 ## [0.3.0] - 2026-10-16
 
