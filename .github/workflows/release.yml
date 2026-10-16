@@ -28,7 +28,7 @@ jobs:
             target: x86_64-apple-darwin
             arch: x64
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -106,7 +106,7 @@ jobs:
           done
           ls -la
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist-${{ matrix.target }}
           path: dist/*
@@ -115,8 +115,8 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           pattern: dist-*
           path: dist
@@ -172,7 +172,7 @@ jobs:
             '{version: $version, notes: ($notes | sub("^\\s+"; "") | sub("\\s+$"; "")),
               pub_date: $date, platforms: $platforms}' > dist/latest.json
           cat dist/latest.json
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           name: Piaz Switch ${{ github.ref_name }}
           body_path: notes.md
