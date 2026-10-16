@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-16
+
 ### Added
 - Updates: the app looks for a new version every few hours (Settings → Updates,
   on by default) and says when one is out, with a notification and an item at the
