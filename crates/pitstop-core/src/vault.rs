@@ -57,7 +57,9 @@ fn get_or_create_key(host: &dyn Host) -> Result<Aes256Gcm> {
     }
     let key = Aes256Gcm::generate_key(OsRng);
     host.keystore_set(KEY_NAME, &B64.encode(key))?;
-    Ok(Aes256Gcm::new(&key))
+    // Read back what the keystore kept: when two processes mint a key at once,
+    // both go on with the one that won, never with a key that was overwritten.
+    existing_key(host)?.ok_or(Error::VaultKeyMissing)
 }
 
 /// Encrypt and store a parked credential blob.

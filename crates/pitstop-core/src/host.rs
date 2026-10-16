@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::error::{Error, Result};
 
@@ -43,6 +44,45 @@ fn io_err(path: &Path, source: std::io::Error) -> Error {
     }
 }
 
+/// Write `bytes` to a new file at `tmp` (owner-only on Unix from the start) and
+/// flush it to disk, so a power cut never leaves an empty file renamed in.
+fn write_synced(tmp: &Path, bytes: &[u8]) -> Result<()> {
+    use std::io::Write;
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(tmp).map_err(|e| io_err(tmp, e))?;
+    file.write_all(bytes).map_err(|e| io_err(tmp, e))?;
+    file.sync_all().map_err(|e| io_err(tmp, e))
+}
+
+/// Rename `tmp` over `path`. `fs::rename` replaces an existing file on every
+/// OS, so `path` never goes missing in between. On Windows a scanner or the
+/// tool reading the file can hold it for a moment: try again briefly.
+fn replace(tmp: &Path, path: &Path) -> Result<()> {
+    let mut tries = 0;
+    loop {
+        match fs::rename(tmp, path) {
+            Ok(()) => return Ok(()),
+            // Access denied, or a sharing or lock violation (32, 33).
+            Err(e)
+                if cfg!(windows)
+                    && tries < 5
+                    && (e.kind() == std::io::ErrorKind::PermissionDenied
+                        || matches!(e.raw_os_error(), Some(32 | 33))) =>
+            {
+                tries += 1;
+                std::thread::sleep(std::time::Duration::from_millis(40 * tries));
+            }
+            Err(e) => return Err(io_err(path, e)),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct RealHost {
     home_override: Option<PathBuf>,
@@ -82,22 +122,19 @@ impl Host for RealHost {
             .parent()
             .ok_or_else(|| Error::InvalidData(format!("path has no parent: {}", path.display())))?;
         fs::create_dir_all(parent).map_err(|e| io_err(parent, e))?;
-        let tmp = path.with_extension(format!("pitstop-tmp-{}", std::process::id()));
-        fs::write(&tmp, bytes).map_err(|e| io_err(&tmp, e))?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600))
-                .map_err(|e| io_err(&tmp, e))?;
+        // One name per write, so two threads writing one path never share it.
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let tmp = path.with_extension(format!(
+            "pitstop-tmp-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        let written = write_synced(&tmp, bytes).and_then(|()| replace(&tmp, path));
+        if written.is_err() {
+            // The temporary file may hold a credential: never leave it behind.
+            let _ = fs::remove_file(&tmp);
         }
-        // Windows cannot rename over an existing file; the brief gap is accepted
-        // and every caller keeps an in-memory backup for rollback.
-        #[cfg(windows)]
-        if path.exists() {
-            fs::remove_file(path).map_err(|e| io_err(path, e))?;
-        }
-        fs::rename(&tmp, path).map_err(|e| io_err(path, e))?;
-        Ok(())
+        written
     }
 
     fn remove_file(&self, path: &Path) -> Result<()> {
@@ -208,10 +245,16 @@ impl Host for RealHost {
     }
 
     fn keystore_get(&self, name: &str) -> Result<Option<String>> {
+        if let Some(value) = keystore_cache().get(name) {
+            return Ok(Some(value.clone()));
+        }
         let entry =
             keyring::Entry::new("pitstop", name).map_err(|e| Error::Keystore(e.to_string()))?;
         match entry.get_password() {
-            Ok(v) => Ok(Some(v)),
+            Ok(v) => {
+                keystore_cache().insert(name.to_owned(), v.clone());
+                Ok(Some(v))
+            }
             Err(keyring::Error::NoEntry) => Ok(None),
             Err(e) => Err(Error::Keystore(e.to_string())),
         }
@@ -222,8 +265,24 @@ impl Host for RealHost {
             keyring::Entry::new("pitstop", name).map_err(|e| Error::Keystore(e.to_string()))?;
         entry
             .set_password(value)
-            .map_err(|e| Error::Keystore(e.to_string()))
+            .map_err(|e| Error::Keystore(e.to_string()))?;
+        // Not cached as written: the next read asks the keystore, so a value
+        // another process wrote at the same moment wins in both.
+        keystore_cache().remove(name);
+        Ok(())
     }
+}
+
+/// What this process read from or wrote to the keystore. The vault key is read
+/// for every parked account on every usage read; on macOS each read may ask
+/// the user to allow it, so it is read once per run.
+fn keystore_cache() -> std::sync::MutexGuard<'static, std::collections::HashMap<String, String>> {
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, String>>> =
+        std::sync::OnceLock::new();
+    CACHE
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 #[cfg(test)]

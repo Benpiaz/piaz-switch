@@ -4,9 +4,10 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use pitstop_core::engine::AccountUsage;
+use pitstop_core::live::Live;
 use pitstop_core::usage::Http;
 use pitstop_core::{signin, Engine, ProviderId, RealHost};
 use tauri::{AppHandle, Emitter, Manager};
@@ -415,27 +416,48 @@ fn warm_ups(
     let (today, minute) = local_day();
     let in_span = duty::in_span(minute, &settings.warm_from, &settings.warm_to);
     let mut ledger = warm::load(host, &today);
-    let home = real_home();
-    let program = signin::find_program(ProviderId::ClaudeCode, &home);
-    let search = signin::search_path(&home);
+    // Found only when an account is due: on macOS a look starts a login shell.
+    let mut tools: Option<(Option<std::path::PathBuf>, Vec<std::path::PathBuf>)> = None;
     let mut judged = Vec::new();
     let mut started_any = false;
     for account in &tool.accounts {
         if !settings.warm_up.contains(&account.name) {
             continue;
         }
-        let token = warm::token_for(host, &account.name, account.in_use);
+        // Asked again, not taken from the snapshot: an automatic switch this
+        // round, or the user, may have changed the login in use since. The
+        // live login decides, as in the window; the record only when the
+        // login can't be read.
+        let in_use = match engine().live(ProviderId::ClaudeCode) {
+            Ok(Live::Account(name)) => name == account.name,
+            Ok(_) => false,
+            Err(_) => engine().state().is_ok_and(|s| {
+                s.active.get(ProviderId::ClaudeCode.as_str()) == Some(&account.name)
+            }),
+        };
+        let account = &model::AccountView {
+            in_use,
+            ..account.clone()
+        };
+        let token = warm::token_for(host, &account.name, in_use);
         let at = now();
         // The account in use lends its token as it is; a parked one lends its
         // whole login, which the warm-up renews when it can.
         let expired = match &token {
             None => true,
-            Some(t) if account.in_use => t.lapsed(at),
+            Some(t) if in_use => t.lapsed(at),
             Some(t) => t.lapsed(at) && !t.renewable,
         };
         let warmed = ledger.get(&account.name).cloned().unwrap_or_default();
         let mut standing = duty::warm_standing(account, &warmed, expired, in_span, at);
         if standing == WarmStanding::Due {
+            let (program, search) = tools.get_or_insert_with(|| {
+                let home = real_home();
+                (
+                    signin::find_program(ProviderId::ClaudeCode, &home),
+                    signin::search_path(&home),
+                )
+            });
             if let (Some(program), Some(token)) = (program.as_ref(), token.as_ref()) {
                 show_warm(
                     app,
@@ -445,8 +467,8 @@ fn warm_ups(
                         warmed_at: warmed.started,
                     },
                 );
-                let outcome = if account.in_use {
-                    Some(warm::run(program, &token.access, &search))
+                let outcome = if in_use {
+                    Some(warm::run(program, &token.access, search))
                 } else {
                     // No switch while the parked login is lent out: one to
                     // this account would put in use a login being renewed.
@@ -455,7 +477,7 @@ fn warm_ups(
                     let still_parked = engine().state().is_ok_and(|s| {
                         s.active.get(ProviderId::ClaudeCode.as_str()) != Some(&account.name)
                     });
-                    still_parked.then(|| warm::run_parked(host, &account.name, program, &search))
+                    still_parked.then(|| warm::run_parked(host, &account.name, program, search))
                 };
                 let Some(outcome) = outcome else {
                     let unchanged = WarmState {
@@ -468,7 +490,7 @@ fn warm_ups(
                     continue;
                 };
                 // A parked login may be renewed even when the warm-up failed.
-                started_any |= outcome.is_ok() || !account.in_use;
+                started_any |= outcome.is_ok() || !in_use;
                 let name = account.name.clone();
                 let warmed = warm::update_if(
                     host,
@@ -518,25 +540,82 @@ fn warm_ups(
 /// Seconds until the next usage read, judged from the resets the last
 /// reading knows of (they stay where they are whatever the new one says).
 fn next_read_wait(app: &AppHandle) -> u64 {
+    use pitstop_core::usage::UsageReport;
     let state = app.state::<AppState>();
-    let resets: Vec<i64> = state
-        .inner
-        .lock()
-        .map(|inner| {
-            inner
-                .usage
-                .iter()
-                .filter_map(|u| match &u.report {
-                    pitstop_core::usage::UsageReport::Ok(usage) => {
-                        Some(usage.windows.iter().filter_map(|w| w.resets_at))
-                    }
-                    _ => None,
-                })
-                .flatten()
-                .collect()
-        })
-        .unwrap_or_default();
+    let (resets, offline): (Vec<i64>, bool) =
+        state
+            .inner
+            .lock()
+            .map(|inner| {
+                let resets = inner
+                    .usage
+                    .iter()
+                    .filter_map(|u| match &u.report {
+                        UsageReport::Ok(usage) => {
+                            Some(usage.windows.iter().filter_map(|w| w.resets_at))
+                        }
+                        _ => None,
+                    })
+                    .flatten()
+                    .collect();
+                // No reading came back and some failed for want of a network, as
+                // when the app starts at login before Wi-Fi is up.
+                let offline = !inner.usage.iter().any(|u| matches!(u.report, UsageReport::Ok(_)))
+                && inner.usage.iter().any(
+                    |u| matches!(&u.report, UsageReport::Failed(why) if why.starts_with("network")),
+                );
+                (resets, offline)
+            })
+            .unwrap_or_default();
+    if offline {
+        return duty::READ_OFFLINE as u64;
+    }
     duty::next_read_after(resets.into_iter(), now()).max(1) as u64
+}
+
+/// Look for each tool not found yet (all of them the first time), so one
+/// installed while the app runs can be added without a restart; `now` skips
+/// the pause between looks. True when one turned up.
+pub fn look_for_tools(app: &AppHandle, now: bool) -> bool {
+    let state = app.state::<AppState>();
+    let missing: Vec<ProviderId> = match state.inner.lock() {
+        Ok(inner) => ProviderId::ALL
+            .iter()
+            .copied()
+            .filter(|p| !inner.installed.iter().any(|(q, found)| q == p && *found))
+            .collect(),
+        Err(_) => return false,
+    };
+    if missing.is_empty() {
+        return false;
+    }
+    // On macOS a look starts a login shell: not more than twice a minute.
+    static LAST: Mutex<Option<Instant>> = Mutex::new(None);
+    if let Ok(mut last) = LAST.lock() {
+        if !now && last.is_some_and(|at| at.elapsed() < Duration::from_secs(30)) {
+            return false;
+        }
+        *last = Some(Instant::now());
+    }
+    let home = real_home();
+    let found: Vec<(ProviderId, bool)> = missing
+        .into_iter()
+        .map(|p| (p, signin::find_program(p, &home).is_some()))
+        .collect();
+    let Ok(mut inner) = state.inner.lock() else {
+        return false;
+    };
+    let mut turned_up = false;
+    for (p, there) in found {
+        match inner.installed.iter_mut().find(|(q, _)| *q == p) {
+            Some(entry) => {
+                turned_up |= there && !entry.1;
+                entry.1 = there;
+            }
+            None => inner.installed.push((p, there)),
+        }
+    }
+    turned_up
 }
 
 /// Look for the tools once, read usage now, again shortly after each limit
@@ -545,17 +624,7 @@ pub fn start_background(app: &AppHandle) {
     let handle = app.clone();
     std::thread::spawn(move || {
         refresh(&handle);
-        let home = real_home();
-        let installed: Vec<(ProviderId, bool)> = ProviderId::ALL
-            .iter()
-            .map(|&p| (p, signin::find_program(p, &home).is_some()))
-            .collect();
-        {
-            let state = handle.state::<AppState>();
-            if let Ok(mut inner) = state.inner.lock() {
-                inner.installed = installed;
-            };
-        }
+        look_for_tools(&handle, true);
         refresh(&handle);
     });
 

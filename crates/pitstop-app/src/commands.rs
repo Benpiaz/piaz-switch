@@ -36,6 +36,10 @@ pub async fn get_snapshot(app: AppHandle) -> Option<Snapshot> {
 pub async fn refresh(app: AppHandle, usage: bool) {
     blocking(move || {
         app::refresh(&app);
+        // The window regains focus after the user installs a tool, for one.
+        if app::look_for_tools(&app, false) {
+            app::refresh(&app);
+        }
         if usage {
             app::read_usage(&app);
         }

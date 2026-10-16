@@ -3,6 +3,32 @@
 ## [Unreleased]
 
 ### Fixed
+- Saving a login, `state.json` or the settings no longer deletes the old file
+  before the new one is in place on Windows, so a crash or a busy file can't lose
+  it; a failed save leaves no temporary copy of a credential behind.
+- A warm-up that runs past two minutes now stops Claude Code and everything it
+  started, instead of leaving the app's automation (and switching, for a parked
+  account) stuck until a restart.
+- Claude Code or Codex installed while the app is open can be added straight
+  away: coming back to the window looks for them again.
+- A warm-up right after an automatic switch uses the account it is meant for.
+- On macOS the app asks the Keychain for its key once per run instead of on
+  every usage read, and no longer starts a login shell every minute when no
+  account has warm-up on.
+- `~/.claude.json` caught mid-write by Claude Code is read again rather than
+  taken as a login without an account, which could later drop `oauthAccount`;
+  a switch writes nothing if the file can't be read, and a byte-order mark is
+  accepted.
+- When the app starts before the network is up (at login), usage is read again
+  after a minute instead of five.
+- Clicks no longer get lost when the window refreshes during the click.
+- A sign-in in progress is no longer hidden behind another dialog and left
+  running; a code that fails to send ends it. Enter can't start a sign-in for a
+  tool that isn't installed.
+- Focus returns to where it was when a dialog closes.
+- Chart axis labels show the decimals they need ($7.5, not $8), "1 day ago",
+  "1 log file", and more errors are shown in Vietnamese.
+- Opening the Usage pane with many session logs is faster.
 - Warm-up on macOS: the parked login is lent to a private directory whose path is
   resolved, so Claude Code finds it in the keychain and its renewed token comes
   back to the vault.

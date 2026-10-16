@@ -416,7 +416,7 @@ impl Drop for Session {
 
 /// Stop the tool and whatever it started: an npm shim is cmd.exe or node with
 /// the real tool under it, and killing the shim alone leaves the tool running.
-fn kill_tree(child: &mut Child) {
+pub fn kill_tree(child: &mut Child) {
     #[cfg(unix)]
     let _ = Command::new("kill")
         .args(["-KILL", &format!("-{}", child.id())])

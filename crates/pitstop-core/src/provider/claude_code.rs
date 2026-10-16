@@ -74,13 +74,11 @@ impl ClaudeCode {
             return Ok(None);
         };
 
-        let oauth_account = match host.read(config_path)? {
-            Some(bytes) => serde_json::from_slice::<serde_json::Value>(&bytes)
-                .ok()
-                .and_then(|cfg| cfg.get("oauthAccount").cloned())
-                .unwrap_or(serde_json::Value::Null),
-            None => serde_json::Value::Null,
-        };
+        // A config that can't be read is an error, not an account without
+        // identity: parked as one, switching back would drop `oauthAccount`.
+        let oauth_account = read_config(host, config_path)?
+            .and_then(|cfg| cfg.get("oauthAccount").cloned())
+            .unwrap_or(serde_json::Value::Null);
 
         let blob = serde_json::to_vec(&Blob {
             credentials,
@@ -202,31 +200,37 @@ impl Provider for ClaudeCode {
         let blob: Blob = serde_json::from_slice(blob)
             .map_err(|e| Error::InvalidData(format!("claude-code blob: {e}")))?;
 
+        // Swap only the oauthAccount key; the rest of ~/.claude.json is the
+        // user's shared config and must survive byte-for-byte in meaning.
+        // Checked before anything is written, so a config that can't be read
+        // leaves the token alone too.
+        let config_path = Self::config_path(host);
+        let as_object = |config: Option<serde_json::Value>| match config {
+            None => Ok(serde_json::json!({})),
+            Some(config) if config.is_object() => Ok(config),
+            Some(_) => Err(Error::InvalidData(
+                "~/.claude.json is not a JSON object".into(),
+            )),
+        };
+        as_object(read_config(host, &config_path)?)?;
+
         if self.keychain(host) {
             host.keychain_set(KEYCHAIN_SERVICE, &blob.credentials)?;
         } else {
             host.write_atomic(&Self::credentials_path(host), blob.credentials.as_bytes())?;
         }
 
-        // Swap only the oauthAccount key; the rest of ~/.claude.json is the
-        // user's shared config and must survive byte-for-byte in meaning.
-        let config_path = Self::config_path(host);
-        let mut config: serde_json::Value = match host.read(&config_path)? {
-            Some(bytes) => serde_json::from_slice(&bytes)
-                .map_err(|e| Error::InvalidData(format!("~/.claude.json: {e}")))?,
-            None => serde_json::json!({}),
-        };
-        let Some(obj) = config.as_object_mut() else {
-            return Err(Error::InvalidData(
-                "~/.claude.json is not a JSON object".into(),
-            ));
-        };
+        // Read again: writing the token can wait on a Keychain prompt, and
+        // what Claude Code saved meanwhile must not be put back as it was.
+        let mut config = as_object(read_config(host, &config_path)?)?;
+        let obj = config.as_object_mut().expect("checked to be an object");
         if blob.oauth_account.is_null() {
             obj.remove("oauthAccount");
         } else {
             obj.insert("oauthAccount".into(), blob.oauth_account);
         }
-        let bytes = serde_json::to_vec(&config)
+        // Indented as Claude Code writes it, so the file stays readable.
+        let bytes = serde_json::to_vec_pretty(&config)
             .map_err(|e| Error::InvalidData(format!("~/.claude.json: {e}")))?;
         host.write_atomic(&config_path, &bytes)
     }
@@ -274,6 +278,27 @@ impl Provider for ClaudeCode {
     }
 }
 
+/// `~/.claude.json`, or None when there is none. Claude Code rewrites it often:
+/// a read that lands mid-write doesn't parse, so it is read again a few times
+/// before it counts as broken. A byte-order mark is skipped.
+fn read_config(host: &dyn Host, path: &Path) -> Result<Option<serde_json::Value>> {
+    let mut tries = 0;
+    loop {
+        let Some(bytes) = host.read(path)? else {
+            return Ok(None);
+        };
+        let text = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&bytes);
+        match serde_json::from_slice(text) {
+            Ok(config) => return Ok(Some(config)),
+            Err(_) if tries < 3 => {
+                tries += 1;
+                std::thread::sleep(std::time::Duration::from_millis(100 * tries));
+            }
+            Err(e) => return Err(Error::InvalidData(format!("~/.claude.json: {e}"))),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -317,6 +342,42 @@ mod tests {
         let blob: serde_json::Value = serde_json::from_slice(&active.blob).unwrap();
         assert_eq!(blob["credentials"], CREDS_A);
         assert_eq!(blob["oauth_account"]["emailAddress"], "a@x.com");
+    }
+
+    #[test]
+    fn a_config_with_a_byte_order_mark_still_gives_the_identity() {
+        let host = FakeHost::new();
+        host.put_file(ClaudeCode::credentials_path(&host), CREDS_A);
+        let mut config = vec![0xEF, 0xBB, 0xBF];
+        config.extend_from_slice(config_with_email("a@x.com").as_bytes());
+        host.put_file(ClaudeCode::config_path(&host), config);
+        let active = file_provider().read_active(&host).unwrap().unwrap();
+        assert_eq!(active.details.label.as_deref(), Some("a@x.com"));
+    }
+
+    #[test]
+    fn a_config_that_does_not_parse_is_an_error_not_a_login_without_identity() {
+        let host = FakeHost::new();
+        host.put_file(ClaudeCode::credentials_path(&host), CREDS_A);
+        host.put_file(ClaudeCode::config_path(&host), r#"{"oauthAccount":{"accou"#);
+        assert!(file_provider().read_active(&host).is_err());
+    }
+
+    #[test]
+    fn write_active_leaves_the_token_alone_when_the_config_does_not_parse() {
+        let host = FakeHost::new();
+        host.put_file(ClaudeCode::credentials_path(&host), CREDS_A);
+        host.put_file(ClaudeCode::config_path(&host), "{ not json");
+        let blob = serde_json::to_vec(&serde_json::json!({
+            "credentials": r#"{"claudeAiOauth":{"accessToken":"TOKEN-B"}}"#,
+            "oauth_account": {"accountUuid": "u-2"},
+        }))
+        .unwrap();
+        assert!(file_provider().write_active(&host, &blob).is_err());
+        assert_eq!(
+            host.file(&ClaudeCode::credentials_path(&host)).unwrap(),
+            CREDS_A.as_bytes()
+        );
     }
 
     #[test]

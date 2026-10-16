@@ -268,7 +268,7 @@ function renderUsage(moves) {
           "div",
           { class: "callout warning" },
           h("div", { class: "callout-badge", "aria-hidden": "true" }, icon("warning")),
-          h("div", { class: "callout-body" }, h("div", { class: "callout-title", text: t("logsFailed", { n: answer.errors.length }) }), h("p", { class: "callout-line", text: answer.errors[0] })),
+          h("div", { class: "callout-body" }, h("div", { class: "callout-title", text: answer.errors.length === 1 ? t("logFailed") : t("logsFailed", { n: answer.errors.length }) }), h("p", { class: "callout-line", text: answer.errors[0] })),
         )
       : null,
     h("section", { class: "panel usage-top" }, summaryOf(view), chartOf(answer, view)),
@@ -494,7 +494,11 @@ function drawChart(host, tip, answer, view, width) {
   const top = max > 0 ? Math.ceil(max / step) * step : step;
   const x = (i) => pad.left + (n > 1 ? (i * plotW) / (n - 1) : plotW / 2);
   const y = (v) => pad.top + plotH - (v / top) * plotH;
-  const tickText = (v) => (by === "cost" ? "$" + v.toLocaleString("en-US", { maximumFractionDigits: step < 1 ? 2 : 0, minimumFractionDigits: step < 1 ? 2 : 0 }) : compact(v));
+  // As many decimals as the step needs: a 2.5 step shows 7.5, not 8.
+  let decimals = 0;
+  while (decimals < 4 && Math.abs(step * 10 ** decimals - Math.round(step * 10 ** decimals)) > 1e-9) decimals++;
+  if (step < 1) decimals = Math.max(decimals, 2);
+  const tickText = (v) => (by === "cost" ? "$" + v.toLocaleString("en-US", { maximumFractionDigits: decimals, minimumFractionDigits: decimals }) : compact(v));
 
   const grid = [];
   for (let v = 0; v <= top + step / 2; v += step) {

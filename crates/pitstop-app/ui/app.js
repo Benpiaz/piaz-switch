@@ -227,7 +227,8 @@ function ago(at) {
   if (secs < 60) return t("agoNow");
   if (secs < 3600) return t("agoMinutes", { n: Math.floor(secs / 60) });
   if (secs < 86400) return t("agoHours", { n: Math.floor(secs / 3600) });
-  return t("agoDays", { n: Math.floor(secs / 86400) });
+  const days = Math.floor(secs / 86400);
+  return days === 1 ? t("agoDay") : t("agoDays", { n: days });
 }
 
 function clockTime(at) {
@@ -288,7 +289,34 @@ systemDark.addEventListener("change", () => applyTheme(themeChoice));
 
 // ---------- the window ----------
 
+// A render replaces the buttons: one landing between the press and the
+// release of a click would swallow it, so it waits for the release.
+let pressing = false;
+let renderWaiting = false;
+let pressTimer = 0;
+const released = () => {
+  pressing = false;
+  clearTimeout(pressTimer);
+  if (renderWaiting) {
+    renderWaiting = false;
+    setTimeout(render);
+  }
+};
+window.addEventListener("pointerdown", () => {
+  pressing = true;
+  // A release outside the window may never arrive: never hold renders long.
+  clearTimeout(pressTimer);
+  pressTimer = setTimeout(released, 2000);
+}, true);
+window.addEventListener("pointerup", released, true);
+window.addEventListener("pointercancel", released, true);
+window.addEventListener("blur", released);
+
 function render() {
+  if (pressing) {
+    renderWaiting = true;
+    return;
+  }
   if (snap) {
     setLanguage(snap.language);
     applyTheme(snap.themeChoice || "system");
@@ -917,7 +945,16 @@ let sheetEl = null; // the dialog itself, kept while its model is the same
 let sheetModel = null;
 let dialogReturn = null; // focus key of what had focus before the dialog
 
+// What asks for a dialog while a sign-in runs waits for it to end (an alert)
+// or is dropped (the window already shows the sign-in): replacing it would
+// leave the sign-in running out of sight.
+let deferredAlert = null;
+
 function openDialog(model) {
+  if (dialog && dialog !== model && dialog.type === "signin" && dialog.phase === "running") {
+    if (model.type === "alert") deferredAlert = model;
+    return;
+  }
   closeMenu();
   if (!dialog) dialogReturn = focusKeyOf(document.activeElement);
   dialog = model;
@@ -927,6 +964,11 @@ function openDialog(model) {
 function closeDialog() {
   dialog = null;
   renderDialog();
+  if (deferredAlert) {
+    const alert = deferredAlert;
+    deferredAlert = null;
+    setTimeout(() => openDialog(alert), 200);
+  }
 }
 
 /** Draw the dialog. The backdrop and sheet stay in the page while the same
@@ -939,6 +981,10 @@ function renderDialog() {
       const el = overlayEl;
       overlayEl = sheetEl = sheetModel = null;
       app.inert = false;
+      // Focus leaves the fading sheet now, or it would drop to the page when
+      // the sheet is removed, and the way back below would be skipped.
+      if (el.contains(document.activeElement)) document.activeElement.blur();
+      el.inert = true;
       leave(el, 160);
       const back = dialogReturn;
       dialogReturn = null;
@@ -1214,7 +1260,7 @@ const DIALOGS = {
     const missing = offered.filter((x) => x.installed === false && !x.accounts.length);
     const chosenMissing = missing.some((x) => x.id === d.provider);
     const nameOk = d.again || NAME_RULE.test(d.name.trim());
-    d.submit = startSignIn;
+    d.submit = () => !chosenMissing && startSignIn();
     // A click moves on to the name, as typing it is what comes next; arrow
     // keys stay on the choice.
     const choose = (id, byKey) => {
@@ -1442,9 +1488,12 @@ async function sendCode() {
     d.refused = false;
     renderDialog();
   } catch (error) {
+    // Back to the form first, so the "cancelled" the cancel sends doesn't
+    // close the dialog; and no sign-in is left running behind the form.
     d.phase = "form";
     d.error = error;
     renderDialog();
+    await invoke("cancel_sign_in").catch(() => {});
   }
 }
 
@@ -1800,6 +1849,7 @@ async function start() {
   render();
   // "resets in" and pace move with the clock.
   setInterval(() => {
+    if (pressing) return;
     if (pane === "accounts" || (pane === "usage" && usage.tab === "limits")) renderPane();
   }, 30000);
 }

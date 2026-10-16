@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use pitstop_core::engine::vault_id;
 use pitstop_core::provider::claude_code::ClaudeCode;
 use pitstop_core::provider::provider_for;
-use pitstop_core::signin::PrivateDir;
+use pitstop_core::signin::{kill_tree, PrivateDir};
 use pitstop_core::{vault, Host, ProviderId};
 use serde_json::Value;
 
@@ -141,6 +141,12 @@ pub fn command(program: &Path, dir: &Path, token: Option<&str>, search: &[PathBu
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
+    // Its own process group, so a timeout reaches what an npm shim starts.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
     cmd
 }
 
@@ -228,27 +234,35 @@ fn run_in(
         .spawn()
         .map_err(|e| Failure::Failed(format!("couldn't start Claude Code: {e}")))?;
     let mut stdout = child.stdout.take();
-    let reader = std::thread::spawn(move || {
+    let (said_tx, said_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
         let mut text = String::new();
         if let Some(out) = stdout.as_mut() {
             let _ = out.read_to_string(&mut text);
         }
-        text
+        let _ = said_tx.send(text);
     });
     let started = Instant::now();
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break Some(status),
             Ok(None) if started.elapsed() > TIMEOUT => {
-                let _ = child.kill();
+                kill_tree(&mut child);
                 let _ = child.wait();
                 break None;
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(200)),
-            Err(e) => return Err(Failure::Failed(e.to_string())),
+            Err(e) => {
+                kill_tree(&mut child);
+                return Err(Failure::Failed(e.to_string()));
+            }
         }
     };
-    let said = reader.join().unwrap_or_default();
+    // Something the tool started may still hold the pipe open: never wait on
+    // it for long, or every duty after this one would wait too.
+    let said = said_rx
+        .recv_timeout(Duration::from_secs(5))
+        .unwrap_or_default();
     match status {
         None => Err(Failure::Failed("Claude Code took too long".into())),
         Some(status) => verdict(status.code(), &said),

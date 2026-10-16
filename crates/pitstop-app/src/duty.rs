@@ -170,6 +170,10 @@ pub const READ_SOONEST: i64 = 30;
 /// How long after a reset its fresh reading is asked for.
 const AFTER_RESET: i64 = 30;
 
+/// Seconds until the next read when every read failed for want of a network:
+/// sooner than the usual five minutes, so usage shows soon after it is back.
+pub const READ_OFFLINE: i64 = 60;
+
 /// Seconds until the next usage read: shortly after the nearest reset still
 /// to come, so a limit that starts afresh shows it within a minute, and
 /// otherwise every five minutes.

@@ -44,6 +44,7 @@ const STRINGS = {
     agoMinutes: "{n} min ago",
     agoHours: "{n} h ago",
     agoDays: "{n} days ago",
+    agoDay: "1 day ago",
     readingAccounts: "Reading accounts…",
     noAccounts: "No Accounts",
     noAccountsDetail: "Sign in to an account to add it, or name the login a tool is using.",
@@ -165,6 +166,7 @@ const STRINGS = {
     noLogs: "No Session Logs Found",
     noLogsDetail: "Piaz Switch reads the logs Claude Code and Codex keep on this computer, and found none in: {dirs}",
     logsFailed: "Couldn’t read {n} log files",
+    logFailed: "Couldn’t read 1 log file",
     pricesFrom: "Prices from LiteLLM’s table, fetched {date}.",
     pricesShipped: "Prices from LiteLLM’s table as shipped with Piaz Switch.",
     refreshUsageHelp: "Read the session logs and every account’s limits again",
@@ -222,6 +224,7 @@ const STRINGS = {
       alreadyEnrolled: "This login is already in Piaz Switch as {name}. Sign in to a different account to add it.",
       wrongAccount: "That sign-in was a different account. Sign in as {name}’s account.",
       duplicateAccount: "{name} is already taken for this tool. Choose another name.",
+      vaultKeyMissing: "Piaz Switch’s key is gone from the system keychain, so parked logins can’t be opened. Forget each parked account, then add it again.",
     },
   },
   vi: {
@@ -265,6 +268,7 @@ const STRINGS = {
     agoMinutes: "{n} phút trước",
     agoHours: "{n} giờ trước",
     agoDays: "{n} ngày trước",
+    agoDay: "1 ngày trước",
     readingAccounts: "Đang đọc tài khoản…",
     noAccounts: "Chưa có tài khoản",
     noAccountsDetail: "Đăng nhập một tài khoản để thêm, hoặc đặt tên cho login mà tool đang dùng.",
@@ -384,6 +388,7 @@ const STRINGS = {
     noLogs: "Không tìm thấy log phiên",
     noLogsDetail: "Piaz Switch đọc log mà Claude Code và Codex lưu trên máy này, và không thấy log nào trong: {dirs}",
     logsFailed: "Không đọc được {n} file log",
+    logFailed: "Không đọc được 1 file log",
     pricesFrom: "Giá theo bảng của LiteLLM, tải lúc {date}.",
     pricesShipped: "Giá theo bảng của LiteLLM đi kèm Piaz Switch.",
     refreshUsageHelp: "Đọc lại log phiên và giới hạn của mọi tài khoản",
@@ -444,7 +449,14 @@ const STRINGS = {
       toolNotFound: "Không tìm thấy công cụ này trên máy.",
       signInRunning: "Đang có một lượt đăng nhập khác.",
       signInTimedOut: "Chờ browser quá lâu nên lượt đăng nhập đã dừng.",
-      vaultKeyMissing: "Khoá vault của Piaz Switch không còn trong keychain; các tài khoản đã park phải thêm lại.",
+      vaultKeyMissing: "Khoá của Piaz Switch không còn trong keychain của hệ thống nên không mở được các login đã park. Hãy Xoá (Forget) từng tài khoản đã park rồi thêm lại.",
+      vaultBlobMissing: "Không tìm thấy login đã park của tài khoản này. Hãy đăng nhập lại tài khoản đó.",
+      vaultCorrupt: "Login đã park của tài khoản này bị hỏng hoặc không giải mã được. Hãy đăng nhập lại tài khoản đó.",
+      ambiguousAccount: "Tên này có ở nhiều công cụ.",
+      io: "Không đọc hoặc ghi được file: {detail}",
+      keystore: "Lỗi kho khoá của hệ thống: {detail}",
+      signIn: "Đăng nhập không thành công: {detail}",
+      invalidData: "Dữ liệu không đọc được: {detail}",
     },
   },
 };
@@ -469,13 +481,22 @@ function t(key, params) {
   return text;
 }
 
+/** An English error's specifics, without the English words in front. */
+function detailOf(message) {
+  return (message || "").replace(/^(io error at |keystore error: |invalid data: )/, "");
+}
+
 /** An error from the app, in the window's language where it has one. */
 function errorText(error) {
   if (!error) return "";
   if (typeof error === "string") return error;
   const translated = STRINGS[LANG].err && STRINGS[LANG].err[error.code];
   if (translated && (error.name || !translated.includes("{name}"))) {
-    return translated.split("{name}").join(error.name || "");
+    return translated
+      .split("{name}")
+      .join(error.name || "")
+      .split("{detail}")
+      .join(detailOf(error.message));
   }
   return error.message || String(error.code);
 }

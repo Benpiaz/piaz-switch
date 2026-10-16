@@ -412,8 +412,9 @@ impl Ledger {
             .filter(|f| f.modified >= oldest)
             .map(|f| (f.path, f.tool, f.len))
             .collect();
-        self.files
-            .retain(|path, _| current.iter().any(|(p, _, _)| p == path));
+        let still_there: std::collections::HashSet<&PathBuf> =
+            current.iter().map(|(p, _, _)| p).collect();
+        self.files.retain(|path, _| still_there.contains(path));
         for (path, tool, len) in current {
             scan.files += 1;
             if let Err(e) = self.read(&path, tool, len) {
