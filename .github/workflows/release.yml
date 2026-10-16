@@ -15,6 +15,7 @@ jobs:
     name: ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: windows-latest
@@ -60,7 +61,7 @@ jobs:
             cp "$dir/pitstop-app.exe" "$dir/pitstop.exe" README.md LICENSE "$name/"
             7z a "dist/$name.zip" "$name" >/dev/null
           else
-            crates/pitstop-app/macos/bundle.sh "$dir/pitstop-app"
+            sh crates/pitstop-app/macos/bundle.sh "$dir/pitstop-app"
             mkdir dmg
             cp -R "$dir/Piaz Switch.app" dmg/
             ln -s /Applications dmg/Applications
