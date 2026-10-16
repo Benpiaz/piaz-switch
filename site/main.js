@@ -54,22 +54,40 @@
     return "other";
   }
 
-  // Apple Silicon shows an "Apple" GPU to WebGL; Intel Macs show Intel/AMD.
-  function macChip() {
+  // The Mac's chip from the GPU WebGL reports: "Apple M1…" on Apple Silicon,
+  // Intel/AMD on Intel Macs. Safari says "Apple GPU" on every Mac, so that
+  // (and anything else) is unknown: no card is marked and the hint under the
+  // cards tells how to check.
+  function macChipFromGpu() {
     try {
       var gl = document.createElement("canvas").getContext("webgl");
       var info = gl && gl.getExtension("WEBGL_debug_renderer_info");
       var renderer = info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : "";
-      if (/Apple M\d|Apple GPU/i.test(renderer)) return "arm";
+      if (/Apple M\d/i.test(renderer)) return "arm";
       if (/Intel|AMD|Radeon|NVIDIA/i.test(renderer)) return "intel";
     } catch (e) {}
-    return "arm";
+    return null;
+  }
+
+  // Chrome and Edge tell the CPU architecture outright; ask them first.
+  function macChip(done) {
+    var uaData = navigator.userAgentData;
+    if (!uaData || !uaData.getHighEntropyValues) return done(macChipFromGpu());
+    uaData.getHighEntropyValues(["architecture"]).then(
+      function (values) {
+        if (values.architecture === "arm") return done("arm");
+        if (values.architecture === "x86") return done("intel");
+        done(macChipFromGpu());
+      },
+      function () {
+        done(macChipFromGpu());
+      }
+    );
   }
 
   var os = detectOs();
   var suggested = null;
   if (os === "windows") suggested = document.querySelector('[data-os="windows"]');
-  if (os === "mac") suggested = document.querySelector(macChip() === "intel" ? '[data-os="mac-intel"]' : '[data-os="mac-arm"]');
 
   var labels = {
     windows: { vi: "Tải cho Windows", en: "Download for Windows" },
@@ -85,14 +103,26 @@
     });
   }
 
-  if (suggested) suggested.classList.add("suggested");
+  function suggest(card) {
+    suggested = card;
+    if (!suggested) return;
+    suggested.classList.add("suggested");
+    paintSuggestion();
+  }
+
+  suggest(suggested);
+  if (os === "mac") {
+    macChip(function (chip) {
+      if (chip) suggest(document.querySelector(chip === "intel" ? '[data-os="mac-intel"]' : '[data-os="mac-arm"]'));
+    });
+  }
   if (labels[os]) {
     document.querySelectorAll("[data-os-icon] use").forEach(function (use) {
       use.setAttribute("href", os === "windows" ? "#i-windows" : "#i-apple");
     });
   }
   // On Windows the hero button downloads the installer at once; elsewhere it
-  // goes to the cards, where the right one is marked.
+  // goes to the cards, where the right one is marked when the chip is known.
   if (os === "windows") {
     document.querySelectorAll(".hero [data-primary-download]").forEach(function (a) {
       a.href = LATEST + "PiazSwitch-windows-x64-setup.exe";

@@ -9,6 +9,7 @@ use crate::app;
 use crate::i18n::Lang;
 use crate::links;
 use crate::model::{self, MenuLine, Snapshot};
+use crate::settings;
 
 const TRAY_ID: &str = "pitstop";
 
@@ -148,7 +149,9 @@ fn chosen(app: &AppHandle, id: &str) {
         }
         ["open"] => app::show_window(app),
         ["link", name] => {
-            let _ = links::open(app, name);
+            if let Err(error) = links::open(app, name) {
+                link_failed(app, name, &error.message);
+            }
             return;
         }
         ["quit"] => {
@@ -160,6 +163,14 @@ fn chosen(app: &AppHandle, id: &str) {
     // A check item toggles itself when chosen; put the menu back as it is.
     let app = app.clone();
     std::thread::spawn(move || app::refresh(&app));
+}
+
+/// The tray has no window to show an alert in, so a link that would not
+/// open is told in a notification, with the address to open by hand.
+fn link_failed(app: &AppHandle, name: &str, error: &str) {
+    let lang = Lang::resolve(settings::load(&app::host()).language.as_deref());
+    let url = links::url(name).unwrap_or(name);
+    app::notify(app, lang.couldnt_open(), &format!("{url}\n{error}"));
 }
 
 /// Switch from the menu. Whether the tool holds a login Pitstop does not

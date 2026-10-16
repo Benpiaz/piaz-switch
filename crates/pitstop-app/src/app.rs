@@ -237,7 +237,7 @@ fn start_read(app: &AppHandle) {
 
 // ---------- duties: automatic switch, run-out notices, warm-ups ----------
 
-fn notify(app: &AppHandle, title: &str, body: &str) {
+pub fn notify(app: &AppHandle, title: &str, body: &str) {
     let _ = app.notification().builder().title(title).body(body).show();
 }
 

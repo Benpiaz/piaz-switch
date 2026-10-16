@@ -72,6 +72,9 @@ impl Lang {
             _ => "",
         }
     }
+    pub fn couldnt_open(self) -> &'static str {
+        self.pick("Couldn’t open the link", "Không mở được link")
+    }
     pub fn no_accounts(self) -> &'static str {
         self.pick("No accounts yet", "Chưa có tài khoản")
     }
