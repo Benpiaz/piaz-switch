@@ -1276,6 +1276,44 @@
     margin-top: 8px;
   }
 
+  .help.invalid {
+    color: var(--bad-ink);
+  }
+
+  /* ---------- update dialog ---------- */
+
+  /* The release's notes as written in CHANGELOG.md: plain text, kept short. */
+  .update-notes {
+    max-height: 180px;
+    margin-top: 16px;
+    overflow-y: auto;
+    padding: 10px 12px;
+    border-radius: var(--r-md);
+    background: var(--fill-soft);
+    font-size: 12px;
+    line-height: 18px;
+    color: var(--ink-2);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    user-select: text;
+    -webkit-user-select: text;
+  }
+
+  .update-progress {
+    display: grid;
+    gap: 10px;
+    margin-top: 16px;
+  }
+
+  .update-progress .bar-fill {
+    background: var(--accent);
+  }
+
+  .update-progress .hint {
+    margin-top: 0;
+    font-variant-numeric: tabular-nums;
+  }
+
   /* ---------- fields ---------- */
 
   .select {
@@ -1574,6 +1612,11 @@
   .sheet-badge.warning {
     background: var(--warn-tint);
     color: var(--warn-ink);
+  }
+
+  .sheet-badge.accent {
+    background: var(--accent-tint);
+    color: var(--accent-ink);
   }
 
   .sheet-head .sheet-words {

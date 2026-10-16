@@ -138,6 +138,28 @@ impl Lang {
         )
     }
 
+    /// The tray item when a newer version is out.
+    pub fn update_to(self, version: &str) -> String {
+        match self {
+            Lang::En => format!("Update to Piaz Switch {version}…"),
+            Lang::Vi => format!("Cập nhật lên Piaz Switch {version}…"),
+        }
+    }
+
+    pub fn update_out(self, version: &str) -> String {
+        match self {
+            Lang::En => format!("Piaz Switch {version} is out"),
+            Lang::Vi => format!("Đã có Piaz Switch {version}"),
+        }
+    }
+
+    pub fn update_out_why(self) -> &'static str {
+        self.pick(
+            "Open Piaz Switch to get it. Your accounts stay as they are.",
+            "Mở Piaz Switch để cập nhật. Các tài khoản vẫn giữ nguyên.",
+        )
+    }
+
     /// `5h` → `5-hour`, `week` → `weekly`, `week Opus` → `weekly Opus`.
     pub fn window(self, label: &str) -> String {
         let (head, rest) = label.split_once(' ').unwrap_or((label, ""));

@@ -12,6 +12,7 @@ mod settings;
 mod signin;
 mod spend;
 mod tray;
+mod updates;
 mod usage_logs;
 mod warm;
 
@@ -19,8 +20,10 @@ use tauri::{Manager, RunEvent, WindowEvent};
 use tauri_plugin_autostart::MacosLauncher;
 
 fn main() {
-    // Started with the session: tray only, no window.
-    let hidden = std::env::args().any(|a| a == "--hidden");
+    // Started with the session: tray only, no window. Not right after an
+    // update, though, which starts the new version with the old one's flags.
+    let updated = updates::just_updated();
+    let hidden = std::env::args().any(|a| a == "--hidden") && !updated;
 
     tauri::Builder::default()
         // First: a second launch only brings the running one's window up.
@@ -33,8 +36,10 @@ fn main() {
         ))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(app::AppState::default())
         .manage(usage_logs::UsageLogs::default())
+        .manage(updates::Updates::default())
         .invoke_handler(tauri::generate_handler![
             commands::get_snapshot,
             commands::refresh,
@@ -54,6 +59,11 @@ fn main() {
             commands::set_warm_up,
             commands::quit,
             usage_logs::usage_report,
+            updates::update_status,
+            updates::check_for_update,
+            updates::set_check_updates,
+            updates::install_update,
+            updates::open_releases,
         ])
         .setup(move |tauri_app| {
             #[cfg(target_os = "macos")]
@@ -64,6 +74,7 @@ fn main() {
             app::refresh(&handle);
             app::start_background(&handle);
             usage_logs::refresh_prices(&handle);
+            updates::start(&handle);
             if !hidden {
                 app::show_window(&handle);
             }

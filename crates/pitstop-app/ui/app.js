@@ -1603,6 +1603,7 @@ function renderSettings() {
       ),
     ),
     automationGroups(),
+    updateGroup(),
     h(
       "section",
       { class: "group" },

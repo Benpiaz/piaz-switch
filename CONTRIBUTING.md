@@ -52,6 +52,16 @@ date the section in `CHANGELOG.md`, then push a tag `vX.Y.Z`. The Release workfl
 builds the Windows installer and portable zip, the macOS `.dmg`s, and publishes
 them with the changelog section as notes.
 
+It also signs what the updater installs (the Windows setup and a
+`PiazSwitch-macos-*.app.tar.gz` per Mac) and publishes `latest.json`, which the
+apps already out there read from `releases/latest/download/latest.json`. Signing
+needs two repository secrets, `TAURI_SIGNING_PRIVATE_KEY` (the key file's content)
+and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. The matching public key is
+`plugins.updater.pubkey` in `crates/pitstop-app/tauri.conf.json`. Keep the private
+key backed up: without it no installed app accepts another update, and a new key
+means everyone downloads the next version by hand. Without the secrets the release
+still builds, with a warning, but offers no update.
+
 ## macOS checklist (first run on a Mac)
 
 - [ ] `cargo test --workspace` — includes Unix-only file-permission tests

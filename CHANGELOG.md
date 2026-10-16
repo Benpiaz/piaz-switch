@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+- Updates: the app looks for a new version every few hours (Settings → Updates,
+  on by default) and says when one is out, with a notification and an item at the
+  top of the tray menu. **Install and Restart** downloads it, checks it against
+  the project's signing key, installs it and starts it again. The portable zip
+  opens the download page instead. Releases now publish `latest.json` and signed
+  update files for this.
+
 ### Fixed
 - Saving a login, `state.json` or the settings no longer deletes the old file
   before the new one is in place on Windows, so a crash or a busy file can't lose

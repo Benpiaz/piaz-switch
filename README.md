@@ -86,6 +86,14 @@ drag it onto the taskbar) or the menu bar (macOS).
 You also need the tools themselves: [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
 and/or the [Codex CLI](https://github.com/openai/codex), signed in once.
 
+**Updates.** From 0.3.0 on, the app looks for a new version every few hours and
+says when there is one (a notification, and an item at the top of the tray menu).
+**Install and Restart** downloads it, checks that it was signed by this project's
+release key, installs it and starts it again; your accounts and settings stay as
+they are. Nothing installs without your click, and **Settings → Updates** can turn
+the checks off or run one now. The portable zip can't replace itself: it offers the
+download page instead. Versions before 0.3.0 have no updater, so get 0.3.0 once by hand.
+
 ## How it works
 
 | Tool | Active credential location | Switch behavior |
@@ -153,7 +161,8 @@ Start Piaz Switch (`pitstop-app.exe` on Windows, `Piaz Switch.app` on macOS). It
   **Limits** tab shows every account's limits in one place. See
   [Cost and tokens](#cost-and-tokens-the-usage-pane).
 - **Settings**: English or Vietnamese, **Open Piaz Switch at login** (tray only, no
-  window, when you sign in to the computer), and **Automation**: switch Claude Code
+  window, when you sign in to the computer), **Updates** (see [Download](#download)),
+  and **Automation**: switch Claude Code
   to the account with the most room left when a limit of the account in use reaches
   a chosen share, a notification when the account in use runs out, and **Warm-up**,
   which starts a chosen account's next five-hour period as soon as the last one ends
@@ -267,6 +276,12 @@ tài khoản còn bao nhiêu hạn mức (5 giờ, tuần, theo model).
 Sau khi mở, app nằm ở khay hệ thống (Windows, góc phải dưới, có thể ẩn sau dấu `^`)
 hoặc thanh menu (macOS). Bấm vào biểu tượng để đổi tài khoản, chọn **Open** để mở
 cửa sổ quản lý; vào **Settings → Language** để chuyển sang tiếng Việt.
+
+**Cập nhật**: từ bản 0.3.0, app tự kiểm tra bản mới vài giờ một lần và báo khi có
+(thông báo, và một mục ở đầu menu khay). Bấm **Cài và khởi động lại** là app tự tải,
+kiểm tra chữ ký, cài và mở lại; tài khoản và cài đặt giữ nguyên. Không có gì được cài
+nếu bạn không bấm. Bản 0.2.0 trở về trước chưa có tính năng này, nên cần tải bản
+0.3.0 bằng tay một lần.
 
 **Thêm tài khoản**: dùng nút **Add Account** trong app. Đừng dùng `/login` của
 Claude Code hay `codex login`, vì chúng thay luôn tài khoản đang dùng.

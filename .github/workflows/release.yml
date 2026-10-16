@@ -36,6 +36,17 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
+      # The app reports the Cargo version and the updater compares it with the
+      # tag's: a mismatch would offer the same update forever.
+      - name: Tag matches the version
+        shell: bash
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
+          if [[ "${GITHUB_REF_NAME#v}" != "$version" ]]; then
+            echo "::error::tag $GITHUB_REF_NAME but Cargo.toml says $version"
+            exit 1
+          fi
+
       - name: Build (Windows installer)
         if: runner.os == 'Windows'
         shell: bash
@@ -50,12 +61,18 @@ jobs:
 
       - name: Package
         shell: bash
+        env:
+          # The updater's key (see "Releasing" in CONTRIBUTING.md). Without it the
+          # release still builds, but the apps out there aren't offered it.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
           dir="target/${{ matrix.target }}/release"
           mkdir dist
           if [[ "${{ runner.os }}" == "Windows" ]]; then
             cp "$dir"/bundle/nsis/*-setup.exe "dist/PiazSwitch-windows-${{ matrix.arch }}-setup.exe"
+            update="PiazSwitch-windows-${{ matrix.arch }}-setup.exe"
             name="PiazSwitch-windows-${{ matrix.arch }}-portable"
             mkdir "$name"
             cp "$dir/pitstop-app.exe" "$dir/pitstop.exe" README.md LICENSE "$name/"
@@ -67,14 +84,26 @@ jobs:
             ln -s /Applications dmg/Applications
             hdiutil create -volname "Piaz Switch" -srcfolder dmg -ov -format UDZO \
               "dist/PiazSwitch-macos-${{ matrix.arch }}.dmg"
+            # What the updater installs: the app bundle alone, no ._ files.
+            update="PiazSwitch-macos-${{ matrix.arch }}.app.tar.gz"
+            COPYFILE_DISABLE=1 tar czf "dist/$update" -C "$dir" "Piaz Switch.app"
             name="pitstop-cli-macos-${{ matrix.arch }}"
             mkdir "$name"
             cp "$dir/pitstop" README.md LICENSE "$name/"
             tar czf "dist/$name.tar.gz" "$name"
           fi
           cd dist
+          if [[ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]]; then
+            # Bound to its version: the app (requireSignedVersion) refuses a
+            # latest.json that pairs a newer number with an older signed file.
+            npx --yes @tauri-apps/cli@^2 signer sign --app-version "${GITHUB_REF_NAME#v}" "$update"
+          else
+            echo "::warning::TAURI_SIGNING_PRIVATE_KEY is not set: $update is not signed, so the app won't offer this release as an update."
+          fi
           if command -v sha256sum >/dev/null; then sum="sha256sum"; else sum="shasum -a 256"; fi
-          for f in *; do $sum "$f" > "$f.sha256"; done
+          for f in *; do
+            [[ "$f" == *.sig ]] || $sum "$f" > "$f.sha256"
+          done
           ls -la
 
       - uses: actions/upload-artifact@v4
@@ -99,7 +128,8 @@ jobs:
             $0 ~ "^## \\[" v "\\]" { found = 1; next }
             found && /^## \[/ { exit }
             found { print }
-          ' CHANGELOG.md > notes.md
+          ' CHANGELOG.md > changes.md
+          cp changes.md notes.md
           cat >> notes.md <<'EOF'
 
           ## Download
@@ -111,9 +141,37 @@ jobs:
           | macOS 11+, Intel | `PiazSwitch-macos-x64.dmg` |
 
           The app is not code-signed yet. Windows: **More info → Run anyway**. macOS: right-click the app → **Open** the first time.
-          Each file has a `.sha256` checksum next to it.
+          Each download has a `.sha256` checksum next to it. The `.sig` files and `latest.json` are for the app's own updater.
           EOF
           cat notes.md
+      - name: Updater manifest (latest.json)
+        run: |
+          set -euo pipefail
+          # The apps read releases/latest/download/latest.json: one entry per
+          # build whose update file was signed.
+          base="https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}"
+          platforms='{}'
+          for pair in windows-x86_64=PiazSwitch-windows-x64-setup.exe \
+                      darwin-aarch64=PiazSwitch-macos-arm64.app.tar.gz \
+                      darwin-x86_64=PiazSwitch-macos-x64.app.tar.gz; do
+            target="${pair%%=*}"
+            file="${pair#*=}"
+            if [[ ! -f "dist/$file.sig" ]]; then
+              echo "::warning::$file is not signed: $target gets no update"
+              continue
+            fi
+            platforms=$(jq --arg t "$target" --arg url "$base/$file" --rawfile sig "dist/$file.sig" \
+              '. + {($t): {url: $url, signature: $sig}}' <<<"$platforms")
+          done
+          if [[ "$platforms" == '{}' ]]; then
+            echo "::warning::nothing was signed, so there is no latest.json"
+            exit 0
+          fi
+          jq -n --arg version "${GITHUB_REF_NAME#v}" --rawfile notes changes.md \
+            --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson platforms "$platforms" \
+            '{version: $version, notes: ($notes | sub("^\\s+"; "") | sub("\\s+$"; "")),
+              pub_date: $date, platforms: $platforms}' > dist/latest.json
+          cat dist/latest.json
       - uses: softprops/action-gh-release@v2
         with:
           name: Piaz Switch ${{ github.ref_name }}

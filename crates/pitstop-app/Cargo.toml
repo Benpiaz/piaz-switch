@@ -24,6 +24,8 @@ serde_json.workspace = true
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 sys-locale = "0.3"
 dirs = "6"
+# No "zip": the Windows update is the NSIS setup.exe itself, not an archive.
+tauri-plugin-updater = { version = "2.14", default-features = false, features = ["rustls-tls"] }
 
 [dev-dependencies]
 base64.workspace = true

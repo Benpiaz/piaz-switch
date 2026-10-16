@@ -29,6 +29,8 @@ pub struct Settings {
     /// whose start is later than its end runs past midnight.
     pub warm_from: String,
     pub warm_to: String,
+    /// Look for a newer Piaz Switch now and then, and say when there is one.
+    pub check_updates: bool,
 }
 
 impl Default for Settings {
@@ -43,6 +45,7 @@ impl Default for Settings {
             warm_up: Vec::new(),
             warm_from: "07:00".into(),
             warm_to: "23:00".into(),
+            check_updates: true,
         }
     }
 }
@@ -96,6 +99,7 @@ mod tests {
         assert!(settings.warm_up.is_empty());
         assert_eq!(settings.warm_from, "07:00");
         assert_eq!(settings.warm_to, "23:00");
+        assert!(settings.check_updates);
     }
 
     #[test]

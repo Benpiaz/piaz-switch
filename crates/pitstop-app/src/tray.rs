@@ -48,7 +48,20 @@ pub fn update(app: &AppHandle, snapshot: &Snapshot, lang: Lang) {
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
         return;
     };
-    let lines = model::menu(snapshot, lang, &clock);
+    let mut lines = model::menu(snapshot, lang, &clock);
+    if let Some(version) = crate::updates::available(app) {
+        lines.splice(
+            0..0,
+            [
+                MenuLine::Action {
+                    id: "update".into(),
+                    title: lang.update_to(&version),
+                    enabled: true,
+                },
+                MenuLine::Separator,
+            ],
+        );
+    }
     if let Ok(menu) = build(app, &lines) {
         let _ = tray.set_menu(Some(menu));
     }
@@ -109,6 +122,7 @@ fn chosen(app: &AppHandle, id: &str) {
         ["use" | "suggest", provider, name] => switch(app, provider, name),
         ["name", provider] => app::open_dialog(app, "name", Some(provider), None),
         ["add"] => app::open_dialog(app, "add", None, None),
+        ["update"] => app::open_dialog(app, "update", None, None),
         ["refresh"] => {
             std::thread::spawn(move || app::read_usage(&owned));
         }
