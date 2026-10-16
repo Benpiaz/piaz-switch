@@ -1,12 +1,13 @@
 //! The tray / menu bar item and its native menu, rebuilt from each snapshot.
 
 use tauri::image::Image;
-use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
+use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Wry};
 
 use crate::app;
 use crate::i18n::Lang;
+use crate::links;
 use crate::model::{self, MenuLine, Snapshot};
 
 const TRAY_ID: &str = "pitstop";
@@ -63,6 +64,11 @@ pub fn update(app: &AppHandle, snapshot: &Snapshot, lang: Lang) {
         );
     }
     if let Ok(menu) = build(app, &lines) {
+        // The author's links go just above the last separator and Quit.
+        let at = lines.len().saturating_sub(2);
+        if let Ok(author) = author_menu(app, lang) {
+            let _ = menu.insert(&author, at);
+        }
         let _ = tray.set_menu(Some(menu));
     }
     let title = model::tray_title(snapshot);
@@ -113,6 +119,20 @@ fn build(app: &AppHandle, lines: &[MenuLine]) -> tauri::Result<Menu<Wry>> {
     Ok(menu)
 }
 
+fn author_menu(app: &AppHandle, lang: Lang) -> tauri::Result<Submenu<Wry>> {
+    let menu = Submenu::new(app, lang.made_by(links::AUTHOR), true)?;
+    for (name, _) in links::LINKS {
+        menu.append(&MenuItem::with_id(
+            app,
+            format!("link|{name}"),
+            lang.link(name),
+            true,
+            None::<&str>,
+        )?)?;
+    }
+    Ok(menu)
+}
+
 /// Runs on the UI thread: anything slower than showing a window goes to a
 /// thread of its own.
 fn chosen(app: &AppHandle, id: &str) {
@@ -127,6 +147,10 @@ fn chosen(app: &AppHandle, id: &str) {
             std::thread::spawn(move || app::read_usage(&owned));
         }
         ["open"] => app::show_window(app),
+        ["link", name] => {
+            let _ = links::open(app, name);
+            return;
+        }
         ["quit"] => {
             std::thread::spawn(move || app::quit(&owned));
             return;

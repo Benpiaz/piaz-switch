@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+- A download page at <https://piaz-switch.vercel.app> (source in `site/`).
+- The author and the project's links (website, GitHub, YouTube @benpiaz, X
+  @benpiazai) in **Settings → About** and in a **Made by Ben Piaz** submenu of
+  the tray menu; the sidebar says "by Ben Piaz" under the version.
+
 ## [0.3.0] - 2026-10-16
 
 ### Added

@@ -1249,6 +1249,21 @@
   .about p + p {
     margin-top: 8px;
   }
+  .about-author {
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+  }
+  .about .about-made {
+    margin-top: 0;
+    color: var(--ink);
+  }
+  .about-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+  }
   .help.invalid {
     color: var(--bad-ink);
   }

@@ -1,0 +1,645 @@
+<!doctype html>
+<html lang="vi" data-lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Piaz Switch — Đổi tài khoản Claude Code &amp; Codex trong một cú bấm</title>
+    <meta name="description" content="App miễn phí cho Windows và macOS: đổi qua lại nhiều tài khoản Claude Code và Codex mà không phải đăng xuất, xem hạn mức 5 giờ / tuần của từng tài khoản và chi phí token. Làm bởi Ben Piaz." />
+    <meta name="author" content="Ben Piaz" />
+    <link rel="canonical" href="https://piaz-switch.vercel.app/" />
+    <link rel="icon" href="assets/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="assets/icon.png" />
+    <meta name="theme-color" content="#f7f9fc" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Piaz Switch" />
+    <meta property="og:title" content="Piaz Switch — Đổi tài khoản Claude Code & Codex trong một cú bấm" />
+    <meta property="og:description" content="Miễn phí cho Windows và macOS. Không đăng xuất, xem hạn mức từng tài khoản, tự đổi khi sắp hết. Làm bởi Ben Piaz." />
+    <meta property="og:url" content="https://piaz-switch.vercel.app/" />
+    <meta property="og:image" content="https://piaz-switch.vercel.app/assets/og.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:creator" content="@benpiazai" />
+    <meta name="twitter:image" content="https://piaz-switch.vercel.app/assets/og.png" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+    <script>
+      // Pick the language before the first paint: a saved choice, else the browser's.
+      (function () {
+        try {
+          var saved = localStorage.getItem("lang");
+          var lang = saved || ((navigator.language || "vi").toLowerCase().indexOf("vi") === 0 ? "vi" : "en");
+          document.documentElement.setAttribute("data-lang", lang);
+          document.documentElement.lang = lang;
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <symbol id="i-github" viewBox="0 0 24 24"><path fill="currentColor" d="M12 .5C5.73.5.5 5.73.5 12a11.5 11.5 0 0 0 7.86 10.92c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.69 5.39-5.25 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 23.5 12C23.5 5.73 18.27.5 12 .5Z"/></symbol>
+      <symbol id="i-youtube" viewBox="0 0 24 24"><path fill="currentColor" d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.6 12 3.6 12 3.6s-7.5 0-9.4.5A3 3 0 0 0 .5 6.2 31 31 0 0 0 0 12a31 31 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.1c1.9.5 9.4.5 9.4.5s7.5 0 9.4-.5a3 3 0 0 0 2.1-2.1A31 31 0 0 0 24 12a31 31 0 0 0-.5-5.8ZM9.6 15.6V8.4l6.2 3.6-6.2 3.6Z"/></symbol>
+      <symbol id="i-x" viewBox="0 0 24 24"><path fill="currentColor" d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></symbol>
+      <symbol id="i-windows" viewBox="0 0 24 24"><path fill="currentColor" d="M2 4.3 10 3.2v7.7H2V4.3Zm9-1.2L22 1.5v9.4H11V3.1ZM2 12h8v7.8l-8-1.1V12Zm9 0h11v9.5l-11-1.6V12Z"/></symbol>
+      <symbol id="i-apple" viewBox="0 0 24 24"><path fill="currentColor" d="M16.37 12.6c-.02-2.3 1.88-3.4 1.96-3.46-1.07-1.56-2.73-1.77-3.32-1.8-1.41-.14-2.76.83-3.47.83-.72 0-1.82-.81-3-.79-1.54.02-2.96.9-3.76 2.28-1.6 2.78-.41 6.9 1.15 9.16.76 1.1 1.67 2.34 2.86 2.3 1.15-.05 1.58-.74 2.97-.74 1.38 0 1.77.74 2.98.72 1.23-.02 2.01-1.12 2.76-2.23.87-1.28 1.23-2.52 1.25-2.58-.03-.01-2.4-.92-2.42-3.65ZM14.1 5.85c.63-.77 1.06-1.83.94-2.89-.91.04-2.01.6-2.66 1.37-.58.67-1.1 1.75-.96 2.79 1.01.08 2.05-.52 2.68-1.27Z"/></symbol>
+      <symbol id="i-download" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 3v12m0 0-5-5m5 5 5-5M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></symbol>
+      <symbol id="i-arrow" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M7 17 17 7M8 7h9v9"/></symbol>
+      <symbol id="i-lock" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10.5" width="16" height="10.5" rx="2.5"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/><path d="M12 15v2"/></g></symbol>
+      <symbol id="i-server-off" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/><path d="m2 2 20 20"/></g></symbol>
+      <symbol id="i-send" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 9 9"/><path d="M21 3 12 12"/><path d="M15 3h6v6"/></g></symbol>
+      <symbol id="i-repeat" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></g></symbol>
+      <symbol id="i-gauge" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 14 15.5 9.5"/><path d="M3.3 18a10 10 0 1 1 17.4 0"/><circle cx="12" cy="14" r="1.2"/></g></symbol>
+      <symbol id="i-zap" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z"/></symbol>
+      <symbol id="i-flame" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M12 22c4 0 7-2.8 7-7 0-3.5-2.5-6.2-4.2-8-.3 2-1.3 3.4-2.8 4C12.6 7.6 11 4.6 8.5 2.5 8.8 6 5 8.6 5 15c0 4.2 3 7 7 7Z"/></symbol>
+      <symbol id="i-chart" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15v2M11 11v6M15 7v10M19 12v5"/></g></symbol>
+      <symbol id="i-terminal" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4" width="19" height="16" rx="2.5"/><path d="m7 9 3 3-3 3M13 15h4"/></g></symbol>
+      <symbol id="i-refresh" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4L21 8"/><path d="M21 3v5h-5"/></g></symbol>
+      <symbol id="i-globe" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></g></symbol>
+      <symbol id="i-star" viewBox="0 0 24 24"><path fill="currentColor" d="m12 2.5 2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5-4.8-4.6 6.6-.9z"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 5v14M5 12h14"/></symbol>
+      <symbol id="i-menu" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M4 7h16M4 12h16M4 17h16"/></symbol>
+      <symbol id="i-user" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4.5 21a7.5 7.5 0 0 1 15 0"/></g></symbol>
+    </svg>
+
+    <a class="skip-link" href="#main">
+      <span lang="vi">Bỏ qua tới nội dung</span><span lang="en">Skip to content</span>
+    </a>
+
+    <!-- ========== nav ========== -->
+    <header class="site-header" id="top">
+      <div class="nav-surface">
+        <a class="wordmark" href="#top" aria-label="Piaz Switch">
+          <img src="assets/icon.png" width="32" height="32" alt="" />
+          <span>Piaz Switch</span>
+        </a>
+        <nav class="desktop-links" aria-label="Main">
+          <a href="#features"><span lang="vi">Tính năng</span><span lang="en">Features</span></a>
+          <a href="#how"><span lang="vi">Cách hoạt động</span><span lang="en">How it works</span></a>
+          <a href="#download"><span lang="vi">Tải về</span><span lang="en">Download</span></a>
+          <a href="#author"><span lang="vi">Tác giả</span><span lang="en">Author</span></a>
+          <a href="#faq"><span lang="vi">Hỏi đáp</span><span lang="en">FAQ</span></a>
+        </nav>
+        <div class="nav-actions">
+          <button class="lang-toggle" type="button" data-lang-toggle aria-label="Đổi ngôn ngữ / Change language">
+            <span class="lang-opt" data-opt="vi">VI</span><span class="lang-opt" data-opt="en">EN</span>
+          </button>
+          <a class="icon-link" href="https://github.com/Benpiaz/piaz-switch" target="_blank" rel="noopener" aria-label="GitHub"><svg><use href="#i-github" /></svg></a>
+          <a class="icon-link hide-sm" href="https://www.youtube.com/@benpiaz" target="_blank" rel="noopener" aria-label="YouTube @benpiaz"><svg><use href="#i-youtube" /></svg></a>
+          <a class="icon-link hide-sm" href="https://x.com/benpiazai" target="_blank" rel="noopener" aria-label="X @benpiazai"><svg><use href="#i-x" /></svg></a>
+          <a class="brand-button compact" href="#download" data-primary-download>
+            <svg class="os-icon"><use href="#i-download" /></svg>
+            <span lang="vi">Tải miễn phí</span><span lang="en">Download free</span>
+          </a>
+          <button class="menu-toggle" type="button" aria-controls="mobile-menu" aria-expanded="false" aria-label="Menu"><svg><use href="#i-menu" /></svg></button>
+        </div>
+      </div>
+      <nav class="mobile-menu" id="mobile-menu" hidden aria-label="Main">
+        <a href="#features"><span lang="vi">Tính năng</span><span lang="en">Features</span></a>
+        <a href="#how"><span lang="vi">Cách hoạt động</span><span lang="en">How it works</span></a>
+        <a href="#download"><span lang="vi">Tải về</span><span lang="en">Download</span></a>
+        <a href="#author"><span lang="vi">Tác giả</span><span lang="en">Author</span></a>
+        <a href="#faq"><span lang="vi">Hỏi đáp</span><span lang="en">FAQ</span></a>
+        <div class="mobile-social">
+          <a href="https://github.com/Benpiaz/piaz-switch" target="_blank" rel="noopener"><svg><use href="#i-github" /></svg>GitHub</a>
+          <a href="https://www.youtube.com/@benpiaz" target="_blank" rel="noopener"><svg><use href="#i-youtube" /></svg>YouTube</a>
+          <a href="https://x.com/benpiazai" target="_blank" rel="noopener"><svg><use href="#i-x" /></svg>X</a>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main" tabindex="-1">
+      <!-- ========== hero ========== -->
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-intro">
+          <h1 id="hero-title">
+            <span lang="vi">Đổi tài khoản Claude Code &amp; Codex chỉ bằng một cú bấm</span>
+            <span lang="en">Switch Claude Code &amp; Codex accounts in one click</span>
+          </h1>
+          <div class="hero-actions">
+            <p>
+              <span lang="vi">Không đăng xuất, không mất phiên đang chạy. Xem mỗi tài khoản còn bao nhiêu hạn mức, và để app tự đổi sang tài khoản còn nhiều chỗ nhất khi sắp hết.</span>
+              <span lang="en">No signing out, no lost sessions. See how much every account has left, and let the app move you to the one with the most room before you run out.</span>
+            </p>
+            <div class="hero-download">
+              <a class="brand-button regular" href="#download" data-primary-download>
+                <svg class="os-icon" data-os-icon><use href="#i-download" /></svg>
+                <span data-primary-label>
+                  <span lang="vi">Tải miễn phí</span><span lang="en">Download for free</span>
+                </span>
+              </a>
+              <a class="fine-print" href="#download">
+                <span lang="vi">Windows 10/11 và macOS 11+ (Apple Silicon &amp; Intel)</span>
+                <span lang="en">Windows 10/11 and macOS 11+ (Apple Silicon &amp; Intel)</span>
+                <span class="version-chip" data-version hidden></span>
+              </a>
+            </div>
+          </div>
+          <div class="social-proof">
+            <a class="author-proof" href="#author">
+              <img class="avatar" src="https://github.com/Benpiaz.png?size=96" width="36" height="36" alt="Ben Piaz" loading="lazy" />
+              <span>
+                <span lang="vi">Làm bởi</span><span lang="en">Made by</span>
+                <strong>Ben Piaz</strong>
+              </span>
+            </a>
+            <div class="proof-links">
+              <a href="https://www.youtube.com/@benpiaz" target="_blank" rel="noopener" aria-label="YouTube @benpiaz"><svg><use href="#i-youtube" /></svg>@benpiaz</a>
+              <a href="https://x.com/benpiazai" target="_blank" rel="noopener" aria-label="X @benpiazai"><svg><use href="#i-x" /></svg>@benpiazai</a>
+            </div>
+            <div class="trust-badges">
+              <span class="trust-badge"><svg><use href="#i-lock" /></svg>AES-256-GCM</span>
+              <span class="trust-badge"><svg><use href="#i-server-off" /></svg><span lang="vi">Không server</span><span lang="en">No server</span></span>
+              <span class="trust-badge"><svg><use href="#i-github" /></svg><span lang="vi">Mã nguồn công khai</span><span lang="en">Source available</span></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- the sky stage with the app on it -->
+        <div class="demo-stage">
+          <div class="sky" aria-hidden="true">
+            <div class="sky-glow"></div>
+            <svg class="waves" viewBox="0 0 1600 600" preserveAspectRatio="none">
+              <defs>
+                <linearGradient id="wave-a" x1="0" x2="1">
+                  <stop offset="0" stop-color="#fff" stop-opacity="0" />
+                  <stop offset=".25" stop-color="#e9fbff" stop-opacity=".95" />
+                  <stop offset=".7" stop-color="#9ee7ff" stop-opacity=".9" />
+                  <stop offset="1" stop-color="#fff" stop-opacity="0" />
+                </linearGradient>
+                <filter id="glow" x="-10%" y="-50%" width="120%" height="200%">
+                  <feGaussianBlur stdDeviation="6" result="b" />
+                  <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+                </filter>
+              </defs>
+              <g filter="url(#glow)" fill="none" stroke="url(#wave-a)" stroke-linecap="round">
+                <path class="wave w1" stroke-width="4" d="M-40 330 C 220 250, 420 250, 640 330 S 1060 420, 1280 330 S 1560 250, 1660 300" />
+                <path class="wave w2" stroke-width="2.4" d="M-40 360 C 260 300, 470 410, 720 360 S 1120 260, 1340 340 S 1580 380, 1660 350" />
+                <path class="wave w3" stroke-width="1.4" d="M-40 300 C 200 380, 520 280, 800 320 S 1200 400, 1420 300 S 1600 300, 1660 320" />
+              </g>
+            </svg>
+            <span class="float-chip c1"><svg><use href="#i-repeat" /></svg></span>
+            <span class="float-chip c2"><svg><use href="#i-terminal" /></svg></span>
+            <span class="float-chip c3"><svg><use href="#i-gauge" /></svg></span>
+            <span class="float-chip c4"><svg><use href="#i-lock" /></svg></span>
+            <span class="float-chip c5"><svg><use href="#i-flame" /></svg></span>
+            <span class="float-chip c6"><svg><use href="#i-chart" /></svg></span>
+            <div class="cloud cl1"></div>
+            <div class="cloud cl2"></div>
+            <div class="cloud cl3"></div>
+          </div>
+
+          <div class="demo-wrap">
+            <div class="demo-tabs" role="tablist" aria-label="Piaz Switch">
+              <button role="tab" id="tab-accounts" aria-controls="shot" aria-selected="true" data-shot="accounts">
+                <svg><use href="#i-user" /></svg>
+                <span lang="vi">Tài khoản</span><span lang="en">Accounts</span>
+                <span class="tab-progress"><span></span></span>
+              </button>
+              <button role="tab" id="tab-usage" aria-controls="shot" aria-selected="false" data-shot="usage">
+                <svg><use href="#i-chart" /></svg>
+                <span lang="vi">Mức dùng</span><span lang="en">Usage</span>
+                <span class="tab-progress"><span></span></span>
+              </button>
+              <button role="tab" id="tab-settings" aria-controls="shot" aria-selected="false" data-shot="settings">
+                <svg><use href="#i-zap" /></svg>
+                <span lang="vi">Tự động</span><span lang="en">Automation</span>
+                <span class="tab-progress"><span></span></span>
+              </button>
+            </div>
+            <figure class="app-window" id="shot" role="tabpanel" aria-labelledby="tab-accounts">
+              <div class="window-bar" aria-hidden="true">
+                <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+                <span class="window-title">Piaz Switch</span>
+              </div>
+              <img data-shot-img src="assets/accounts-light.webp" width="1720" height="1600" alt="Piaz Switch: mỗi tài khoản với hạn mức 5 giờ, tuần và theo model" />
+              <figcaption class="window-caption" data-shot-caption>
+                <span lang="vi">Mọi tài khoản, hạn mức 5 giờ / tuần / theo model và nhịp dùng của bạn.</span>
+                <span lang="en">Every account with its 5-hour, weekly and per-model limits and your pace.</span>
+              </figcaption>
+            </figure>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== privacy ========== -->
+      <section class="section" id="privacy" aria-labelledby="privacy-title">
+        <div class="section-head">
+          <p class="eyebrow"><span lang="vi">Riêng tư</span><span lang="en">Privacy</span></p>
+          <h2 id="privacy-title"><span lang="vi">Login của bạn ở lại máy bạn</span><span lang="en">Your logins stay on your machine</span></h2>
+          <p class="lede">
+            <span lang="vi">Không server, không telemetry, không tài khoản của chúng tôi. Piaz Switch chỉ là một app nhỏ trên khay hệ thống.</span>
+            <span lang="en">No server, no telemetry, no account of ours. Piaz Switch is just a small app in your tray.</span>
+          </p>
+        </div>
+        <div class="card-grid three">
+          <article class="card">
+            <span class="card-icon"><svg><use href="#i-lock" /></svg></span>
+            <h3><span lang="vi">Mã hoá trên đĩa</span><span lang="en">Encrypted on disk</span></h3>
+            <p>
+              <span lang="vi">Login đã park được mã hoá AES-256-GCM trong <code>~/.pitstop/vault/</code>, khoá nằm trong Windows Credential Manager hoặc macOS Keychain.</span>
+              <span lang="en">Parked logins are AES-256-GCM encrypted in <code>~/.pitstop/vault/</code>, with the key in Windows Credential Manager or the macOS Keychain.</span>
+            </p>
+          </article>
+          <article class="card">
+            <span class="card-icon"><svg><use href="#i-server-off" /></svg></span>
+            <h3><span lang="vi">Không có server nào</span><span lang="en">No server at all</span></h3>
+            <p>
+              <span lang="vi">Không đăng ký, không thu thập dữ liệu. Log phiên của các tool chỉ được đọc ngay trên máy bạn.</span>
+              <span lang="en">No sign-up, nothing collected. The tools' session logs are only ever read on your computer.</span>
+            </p>
+          </article>
+          <article class="card">
+            <span class="card-icon"><svg><use href="#i-send" /></svg></span>
+            <h3><span lang="vi">Mỗi login về đúng nơi cấp</span><span lang="en">Each login goes home only</span></h3>
+            <p>
+              <span lang="vi">Yêu cầu đọc hạn mức của một tài khoản chỉ gửi tới chính dịch vụ đã cấp login đó, không đi đâu khác.</span>
+              <span lang="en">An account's usage request only goes to the service that issued its login, nowhere else.</span>
+            </p>
+          </article>
+        </div>
+        <a class="oss-card" href="https://github.com/Benpiaz/piaz-switch" target="_blank" rel="noopener">
+          <span class="oss-mark"><svg><use href="#i-github" /></svg></span>
+          <span class="oss-text">
+            <strong><span lang="vi">Mã nguồn công khai trên GitHub</span><span lang="en">Source available on GitHub</span></strong>
+            <span>
+              <span lang="vi">Xem từng dòng code, tự build, báo lỗi hoặc góp ý. Miễn phí dùng, sửa và chia sẻ — chỉ không được bán lại.</span>
+              <span lang="en">Read every line, build it yourself, report bugs or suggest ideas. Free to use, change and share — just not to resell.</span>
+            </span>
+          </span>
+          <span class="oss-stats">
+            <span class="stat"><svg><use href="#i-star" /></svg><span data-stars>—</span></span>
+            <span class="stat"><svg><use href="#i-download" /></svg><span data-downloads>—</span></span>
+            <span class="oss-go"><svg><use href="#i-arrow" /></svg></span>
+          </span>
+        </a>
+      </section>
+
+      <!-- ========== features ========== -->
+      <section class="section" id="features" aria-labelledby="features-title">
+        <div class="section-head">
+          <p class="eyebrow"><span lang="vi">Tính năng</span><span lang="en">Features</span></p>
+          <h2 id="features-title"><span lang="vi">Mọi thứ bạn cần khi dùng nhiều tài khoản</span><span lang="en">Everything you need for many accounts</span></h2>
+        </div>
+
+        <div class="bento">
+          <article class="card bento-wide">
+            <div class="bento-copy">
+              <span class="card-icon"><svg><use href="#i-repeat" /></svg></span>
+              <h3><span lang="vi">Đổi ngay từ khay hệ thống</span><span lang="en">Switch right from the tray</span></h3>
+              <p>
+                <span lang="vi">Bấm vào icon, chọn tài khoản — xong. Các phiên Claude Code đang mở tự đi theo, không cần đăng nhập lại.</span>
+                <span lang="en">Click the icon, pick an account — done. Open Claude Code sessions follow along, no signing in again.</span>
+              </p>
+            </div>
+            <div class="mock-menu" aria-hidden="true">
+              <div class="mm-head">Claude Code</div>
+              <div class="mm-item on"><svg><use href="#i-check" /></svg>Work <em>5h 42% · week 67%</em></div>
+              <div class="mm-item">Personal <em>5h 12% · week 31%</em></div>
+              <div class="mm-item">Team <em>5h 78% · week 84%</em></div>
+              <div class="mm-sep"></div>
+              <div class="mm-head">Codex</div>
+              <div class="mm-item on"><svg><use href="#i-check" /></svg>Main <em>5h 23% · week 41%</em></div>
+              <div class="mm-sep"></div>
+              <div class="mm-item plain"><svg><use href="#i-plus" /></svg><span lang="vi">Thêm tài khoản…</span><span lang="en">Add Account…</span></div>
+            </div>
+          </article>
+
+          <article class="card">
+            <span class="card-icon"><svg><use href="#i-gauge" /></svg></span>
+            <h3><span lang="vi">Thấy rõ hạn mức</span><span lang="en">See every limit</span></h3>
+            <p>
+              <span lang="vi">5 giờ, tuần và theo từng model, giờ reset và bạn đang dùng nhanh hay chậm hơn nhịp.</span>
+              <span lang="en">5-hour, weekly and per-model usage, reset times, and whether you're over or under pace.</span>
+            </p>
+            <div class="mock-bars" aria-hidden="true">
+              <div class="bar"><span class="lbl">5h</span><span class="track"><span class="fill ok" style="--w: 42%"></span><span class="pace" style="--p: 57%"></span></span><span class="pct">42%</span></div>
+              <div class="bar"><span class="lbl">week</span><span class="track"><span class="fill ok" style="--w: 67%"></span><span class="pace" style="--p: 54%"></span></span><span class="pct">67%</span></div>
+              <div class="bar"><span class="lbl">Opus</span><span class="track"><span class="fill warn" style="--w: 84%"></span><span class="pace" style="--p: 74%"></span></span><span class="pct">84%</span></div>
+            </div>
+          </article>
+
+          <article class="card">
+            <span class="card-icon"><svg><use href="#i-zap" /></svg></span>
+            <h3><span lang="vi">Tự đổi trước khi hết</span><span lang="en">Switches before you run out</span></h3>
+            <p>
+              <span lang="vi">Khi tài khoản đang dùng sắp chạm trần, app chuyển sang tài khoản còn nhiều chỗ nhất.</span>
+              <span lang="en">When the account in use is about to hit its limit, the app moves to the one with the most room left.</span>
+            </p>
+          </article>
+
+          <article class="card">
+            <span class="card-icon"><svg><use href="#i-flame" /></svg></span>
+            <h3><span lang="vi">Warm-up cửa sổ 5 giờ</span><span lang="en">Warm up the 5-hour window</span></h3>
+            <p>
+              <span lang="vi">Khởi động sẵn cửa sổ 5 giờ kế tiếp của tài khoản, để lúc cần là đã có hạn mức mới.</span>
+              <span lang="en">Start an account's next 5-hour window early, so fresh room is ready when you need it.</span>
+            </p>
+          </article>
+
+          <article class="card">
+            <span class="card-icon"><svg><use href="#i-chart" /></svg></span>
+            <h3><span lang="vi">Biết mình đã tiêu bao nhiêu</span><span lang="en">Know what you used</span></h3>
+            <p>
+              <span lang="vi">Token và chi phí quy theo giá API, theo tool và theo ngày — tính từ log ngay trên máy bạn.</span>
+              <span lang="en">Tokens and cost at API prices, per tool and per day — worked out from the logs on your own machine.</span>
+            </p>
+          </article>
+
+          <article class="card bento-wide dark">
+            <div class="bento-copy">
+              <span class="card-icon"><svg><use href="#i-terminal" /></svg></span>
+              <h3><span lang="vi">Có cả dòng lệnh</span><span lang="en">A command line too</span></h3>
+              <p>
+                <span lang="vi">Thích terminal? Lệnh <code>pitstop</code> làm được mọi thứ app làm: liệt kê, đổi, xem hạn mức.</span>
+                <span lang="en">Prefer the terminal? The <code>pitstop</code> command does what the app does: list, switch, check limits.</span>
+              </p>
+            </div>
+            <pre class="mock-term" aria-hidden="true"><span class="p">$</span> pitstop list
+<span class="m">claude</span>  <span class="g">●</span> work      42% 5h · 67% week
+        ○ personal  12% 5h · 31% week
+<span class="m">codex</span>   <span class="g">●</span> main      23% 5h · 41% week
+<span class="p">$</span> pitstop use claude personal
+<span class="g">✓</span> Claude Code → personal</pre>
+          </article>
+
+          <article class="card">
+            <span class="card-icon"><svg><use href="#i-refresh" /></svg></span>
+            <h3><span lang="vi">Tự cập nhật</span><span lang="en">Updates itself</span></h3>
+            <p>
+              <span lang="vi">Báo khi có bản mới, kiểm tra chữ ký rồi cài trong một cú bấm. Tài khoản và cài đặt giữ nguyên.</span>
+              <span lang="en">Tells you when a new version is out, checks its signature and installs in one click. Accounts and settings stay.</span>
+            </p>
+          </article>
+
+          <article class="card bento-strip">
+            <span class="card-icon"><svg><use href="#i-globe" /></svg></span>
+            <div class="bento-copy">
+              <h3><span lang="vi">Tiếng Việt, sáng hay tối tuỳ bạn</span><span lang="en">Vietnamese, light or dark — your call</span></h3>
+              <p>
+                <span lang="vi">Giao diện tiếng Việt và tiếng Anh, theo hệ thống hoặc theo bạn chọn trong Cài đặt.</span>
+                <span lang="en">English and Vietnamese interface, following the system or your choice in Settings.</span>
+              </p>
+            </div>
+            <div class="chips" aria-hidden="true">
+              <span class="chip on">Tiếng Việt</span><span class="chip">English</span><span class="chip">☀︎ Light</span><span class="chip dark">☾ Dark</span>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <!-- ========== how ========== -->
+      <section class="section" id="how" aria-labelledby="how-title">
+        <div class="section-head">
+          <p class="eyebrow"><span lang="vi">Cách hoạt động</span><span lang="en">How it works</span></p>
+          <h2 id="how-title"><span lang="vi">Ba bước, rồi quên nó đi</span><span lang="en">Three steps, then forget about it</span></h2>
+        </div>
+        <ol class="steps">
+          <li class="card step">
+            <span class="step-n">1</span>
+            <h3><span lang="vi">Tải và mở app</span><span lang="en">Download and open</span></h3>
+            <p>
+              <span lang="vi">App nằm ở khay hệ thống (Windows) hoặc thanh menu (macOS). Bạn chỉ cần Claude Code và/hoặc Codex CLI đã đăng nhập một lần.</span>
+              <span lang="en">It lives in the system tray (Windows) or the menu bar (macOS). You just need Claude Code and/or the Codex CLI signed in once.</span>
+            </p>
+          </li>
+          <li class="card step">
+            <span class="step-n">2</span>
+            <h3><span lang="vi">Thêm tài khoản</span><span lang="en">Add your accounts</span></h3>
+            <p>
+              <span lang="vi">Nút <b>Thêm tài khoản</b> chạy bước đăng nhập của chính tool trong một thư mục riêng — tài khoản đang dùng không bị đụng tới.</span>
+              <span lang="en"><b>Add Account</b> runs the tool's own sign-in in a private folder — the account in use is never touched.</span>
+            </p>
+          </li>
+          <li class="card step">
+            <span class="step-n">3</span>
+            <h3><span lang="vi">Bấm để đổi</span><span lang="en">Click to switch</span></h3>
+            <p>
+              <span lang="vi">Login đang dùng được park lại, login bạn chọn được đặt vào chỗ tool đọc. Mỗi lần ghi đều nguyên tử, lỗi là tự hoàn tác.</span>
+              <span lang="en">The live login is parked, the one you pick is put where the tool reads it. Every write is atomic and a failed switch rolls back.</span>
+            </p>
+          </li>
+        </ol>
+      </section>
+
+      <!-- ========== download ========== -->
+      <section class="section" id="download" aria-labelledby="download-title">
+        <div class="section-head">
+          <p class="eyebrow"><span lang="vi">Tải về</span><span lang="en">Download</span></p>
+          <h2 id="download-title"><span lang="vi">Chọn máy của bạn</span><span lang="en">Pick your computer</span></h2>
+          <p class="lede">
+            <span lang="vi">Miễn phí. Bản mới nhất</span><span lang="en">Free. Latest version</span>
+            <strong data-version-text>v0.3.0</strong>
+            · <a href="https://github.com/Benpiaz/piaz-switch/releases" target="_blank" rel="noopener"><span lang="vi">tất cả phiên bản</span><span lang="en">all versions</span></a>
+            · <a href="https://github.com/Benpiaz/piaz-switch/blob/main/CHANGELOG.md" target="_blank" rel="noopener"><span lang="vi">có gì mới</span><span lang="en">what's new</span></a>
+          </p>
+        </div>
+
+        <div class="dl-grid">
+          <article class="card dl-card" data-os="windows">
+            <span class="dl-os"><svg><use href="#i-windows" /></svg></span>
+            <h3>Windows</h3>
+            <p class="dl-req"><span lang="vi">Windows 10/11, 64-bit</span><span lang="en">Windows 10/11, 64-bit</span></p>
+            <a class="brand-button regular full" href="https://github.com/Benpiaz/piaz-switch/releases/latest/download/PiazSwitch-windows-x64-setup.exe" data-dl="win-setup">
+              <svg><use href="#i-download" /></svg><span lang="vi">Tải bản cài đặt</span><span lang="en">Download installer</span>
+            </a>
+            <a class="ghost-button full" href="https://github.com/Benpiaz/piaz-switch/releases/latest/download/PiazSwitch-windows-x64-portable.zip">
+              <span lang="vi">Bản portable (.zip, không cần cài)</span><span lang="en">Portable (.zip, no install)</span>
+            </a>
+            <p class="dl-note">
+              <span lang="vi">Nếu hiện “Windows protected your PC”: bấm <b>More info → Run anyway</b>. App chưa có chữ ký số, không phải virus.</span>
+              <span lang="en">If you see “Windows protected your PC”: click <b>More info → Run anyway</b>. The app isn't code-signed yet.</span>
+            </p>
+          </article>
+
+          <article class="card dl-card" data-os="mac-arm">
+            <span class="dl-os"><svg><use href="#i-apple" /></svg></span>
+            <h3>macOS <small>Apple Silicon</small></h3>
+            <p class="dl-req"><span lang="vi">macOS 11+, chip Apple M1 trở lên</span><span lang="en">macOS 11+, Apple M1 or newer</span></p>
+            <a class="brand-button regular full" href="https://github.com/Benpiaz/piaz-switch/releases/latest/download/PiazSwitch-macos-arm64.dmg" data-dl="mac-arm">
+              <svg><use href="#i-download" /></svg><span lang="vi">Tải .dmg</span><span lang="en">Download .dmg</span>
+            </a>
+            <p class="dl-note">
+              <span lang="vi">Mở .dmg, kéo <b>Piaz Switch</b> vào <b>Applications</b>, lần đầu chuột phải vào app → <b>Open</b>.</span>
+              <span lang="en">Open the .dmg, drag <b>Piaz Switch</b> to <b>Applications</b>, then right-click it → <b>Open</b> the first time.</span>
+            </p>
+          </article>
+
+          <article class="card dl-card" data-os="mac-intel">
+            <span class="dl-os"><svg><use href="#i-apple" /></svg></span>
+            <h3>macOS <small>Intel</small></h3>
+            <p class="dl-req"><span lang="vi">macOS 11+, chip Intel</span><span lang="en">macOS 11+, Intel chips</span></p>
+            <a class="brand-button regular full" href="https://github.com/Benpiaz/piaz-switch/releases/latest/download/PiazSwitch-macos-x64.dmg" data-dl="mac-intel">
+              <svg><use href="#i-download" /></svg><span lang="vi">Tải .dmg</span><span lang="en">Download .dmg</span>
+            </a>
+            <p class="dl-note">
+              <span lang="vi">Không chắc máy mình chip gì? Menu Apple → <b>About This Mac</b>: ghi “Chip Apple M…” là Apple Silicon.</span>
+              <span lang="en">Not sure which chip? Apple menu → <b>About This Mac</b>: “Chip Apple M…” means Apple Silicon.</span>
+            </p>
+          </article>
+        </div>
+
+        <p class="dl-foot">
+          <span lang="vi">Cần thêm: <a href="https://docs.anthropic.com/en/docs/claude-code" target="_blank" rel="noopener">Claude Code</a> và/hoặc <a href="https://github.com/openai/codex" target="_blank" rel="noopener">Codex CLI</a>, đã đăng nhập một lần. Dòng lệnh <code>pitstop</code> có sẵn trong bản portable Windows và trên <a href="https://github.com/Benpiaz/piaz-switch/releases/latest" target="_blank" rel="noopener">trang release</a> cho macOS.</span>
+          <span lang="en">You also need <a href="https://docs.anthropic.com/en/docs/claude-code" target="_blank" rel="noopener">Claude Code</a> and/or the <a href="https://github.com/openai/codex" target="_blank" rel="noopener">Codex CLI</a>, signed in once. The <code>pitstop</code> command line ships in the Windows portable zip and on the <a href="https://github.com/Benpiaz/piaz-switch/releases/latest" target="_blank" rel="noopener">release page</a> for macOS.</span>
+        </p>
+      </section>
+
+      <!-- ========== author ========== -->
+      <section class="section" id="author" aria-labelledby="author-title">
+        <div class="author-card">
+          <img class="author-photo" src="https://github.com/Benpiaz.png?size=240" width="120" height="120" alt="Ben Piaz" loading="lazy" />
+          <div class="author-copy">
+            <p class="eyebrow"><span lang="vi">Tác giả</span><span lang="en">Author</span></p>
+            <h2 id="author-title">Ben Piaz</h2>
+            <p>
+              <span lang="vi">Mình làm Piaz Switch vì chính mình dùng nhiều tài khoản Claude Code và Codex mỗi ngày. Mình chia sẻ về AI, Claude Code và cách làm sản phẩm cùng AI trên YouTube và X — ghé chơi và theo dõi để nhận bản mới nhé!</span>
+              <span lang="en">I built Piaz Switch because I juggle several Claude Code and Codex accounts every day. I share about AI, Claude Code and building products with AI on YouTube and X — come say hi and follow for new releases!</span>
+            </p>
+            <div class="author-links">
+              <a class="social-button yt" href="https://www.youtube.com/@benpiaz" target="_blank" rel="noopener"><svg><use href="#i-youtube" /></svg><span>YouTube</span><em>@benpiaz</em></a>
+              <a class="social-button x" href="https://x.com/benpiazai" target="_blank" rel="noopener"><svg><use href="#i-x" /></svg><span>X</span><em>@benpiazai</em></a>
+              <a class="social-button gh" href="https://github.com/Benpiaz/piaz-switch" target="_blank" rel="noopener"><svg><use href="#i-github" /></svg><span>GitHub</span><em>Benpiaz/piaz-switch</em></a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== faq ========== -->
+      <section class="section narrow" id="faq" aria-labelledby="faq-title">
+        <div class="section-head">
+          <p class="eyebrow"><span lang="vi">Hỏi đáp</span><span lang="en">FAQ</span></p>
+          <h2 id="faq-title"><span lang="vi">Câu hỏi thường gặp</span><span lang="en">Common questions</span></h2>
+        </div>
+        <div class="faq">
+          <details>
+            <summary><span lang="vi">Piaz Switch có miễn phí không?</span><span lang="en">Is Piaz Switch free?</span></summary>
+            <p>
+              <span lang="vi">Có, hoàn toàn miễn phí. Giấy phép MIT + Commons Clause: bạn được dùng, sửa và chia sẻ thoải mái, chỉ không được bán lại.</span>
+              <span lang="en">Yes, completely. The license is MIT + Commons Clause: use it, change it and share it freely — just don't sell it.</span>
+            </p>
+          </details>
+          <details>
+            <summary><span lang="vi">Login của tôi có an toàn không?</span><span lang="en">Are my logins safe?</span></summary>
+            <p>
+              <span lang="vi">Login đã park được mã hoá AES-256-GCM trên đĩa, khoá nằm trong keychain của hệ thống. Không có server nào của Piaz Switch; mỗi login chỉ được gửi tới dịch vụ đã cấp nó. Mã nguồn công khai nên bạn có thể tự kiểm tra.</span>
+              <span lang="en">Parked logins are AES-256-GCM encrypted on disk with the key in the system keychain. There is no Piaz Switch server; each login only goes to the service that issued it. The source is public, so you can check.</span>
+            </p>
+          </details>
+          <details>
+            <summary><span lang="vi">Sao Windows / macOS cảnh báo khi mở?</span><span lang="en">Why does Windows / macOS warn me?</span></summary>
+            <p>
+              <span lang="vi">App chưa có chứng chỉ ký số (khá đắt), nên hệ thống cảnh báo một lần. Windows: <b>More info → Run anyway</b>. macOS: chuột phải → <b>Open</b>, hoặc cho phép trong <b>System Settings → Privacy &amp; Security</b>.</span>
+              <span lang="en">The app isn't code-signed yet, so the system warns once. Windows: <b>More info → Run anyway</b>. macOS: right-click → <b>Open</b>, or allow it in <b>System Settings → Privacy &amp; Security</b>.</span>
+            </p>
+          </details>
+          <details>
+            <summary><span lang="vi">Đổi tài khoản có làm mất phiên đang chạy không?</span><span lang="en">Does switching break running sessions?</span></summary>
+            <p>
+              <span lang="vi">Với Claude Code, các phiên đang mở tự dùng tài khoản mới ngay. Với Codex, phiên đang chạy giữ tài khoản cũ cho tới khi bạn mở lại.</span>
+              <span lang="en">Open Claude Code sessions pick up the new account right away. A running Codex keeps the old account until you restart it.</span>
+            </p>
+          </details>
+          <details>
+            <summary><span lang="vi">Tôi nên thêm tài khoản thế nào?</span><span lang="en">How should I add accounts?</span></summary>
+            <p>
+              <span lang="vi">Luôn dùng nút <b>Thêm tài khoản</b> trong app, đừng dùng <code>/login</code> hay <code>codex login</code>, và đừng đăng xuất trong tool — đăng xuất sẽ huỷ login mà app đã park.</span>
+              <span lang="en">Always use <b>Add Account</b> in the app, not <code>/login</code> or <code>codex login</code>, and don't log out in the tools — logging out ends the login the app parked.</span>
+            </p>
+          </details>
+          <details>
+            <summary><span lang="vi">Cập nhật bản mới thế nào?</span><span lang="en">How do I get updates?</span></summary>
+            <p>
+              <span lang="vi">Từ bản 0.3.0, app tự kiểm tra vài giờ một lần và báo khi có bản mới; bấm <b>Cài và khởi động lại</b> là xong. Bản cũ hơn 0.3.0 thì tải lại một lần ở trang này.</span>
+              <span lang="en">From 0.3.0 on, the app checks every few hours and tells you when there's a new version; click <b>Install and Restart</b>. Older than 0.3.0? Download once from this page.</span>
+            </p>
+          </details>
+          <details>
+            <summary><span lang="vi">Có bản cho Linux không?</span><span lang="en">Is there a Linux version?</span></summary>
+            <p>
+              <span lang="vi">Hiện có bản dựng sẵn cho Windows và macOS. Bạn có thể tự build từ <a href="https://github.com/Benpiaz/piaz-switch" target="_blank" rel="noopener">mã nguồn</a>, hoặc theo dõi <a href="https://x.com/benpiazai" target="_blank" rel="noopener">@benpiazai</a> để biết khi có tin mới.</span>
+              <span lang="en">Ready-made builds are for Windows and macOS. You can build from the <a href="https://github.com/Benpiaz/piaz-switch" target="_blank" rel="noopener">source</a>, or follow <a href="https://x.com/benpiazai" target="_blank" rel="noopener">@benpiazai</a> for news.</span>
+            </p>
+          </details>
+          <details>
+            <summary><span lang="vi">Gặp lỗi thì báo ở đâu?</span><span lang="en">Where do I report a bug?</span></summary>
+            <p>
+              <span lang="vi">Mở một issue trên <a href="https://github.com/Benpiaz/piaz-switch/issues" target="_blank" rel="noopener">GitHub</a>, hoặc nhắn Ben trên <a href="https://x.com/benpiazai" target="_blank" rel="noopener">X</a>.</span>
+              <span lang="en">Open an issue on <a href="https://github.com/Benpiaz/piaz-switch/issues" target="_blank" rel="noopener">GitHub</a>, or message Ben on <a href="https://x.com/benpiazai" target="_blank" rel="noopener">X</a>.</span>
+            </p>
+          </details>
+        </div>
+      </section>
+
+      <!-- ========== final cta ========== -->
+      <section class="final-cta" aria-labelledby="cta-title">
+        <div class="sky small" aria-hidden="true">
+          <div class="sky-glow"></div>
+          <div class="cloud cl1"></div>
+          <div class="cloud cl2"></div>
+        </div>
+        <div class="final-inner">
+          <img src="assets/icon.png" width="72" height="72" alt="" />
+          <h2 id="cta-title"><span lang="vi">Thử ngay, miễn phí</span><span lang="en">Try it, for free</span></h2>
+          <p>
+            <span lang="vi">Một cú bấm để đổi tài khoản. Không bao giờ bị kẹt vì hết hạn mức nữa.</span>
+            <span lang="en">One click to switch accounts. Never get stuck on a used-up limit again.</span>
+          </p>
+          <a class="brand-button regular glass" href="#download" data-primary-download>
+            <svg><use href="#i-download" /></svg><span lang="vi">Tải Piaz Switch</span><span lang="en">Download Piaz Switch</span>
+          </a>
+        </div>
+      </section>
+    </main>
+
+    <!-- ========== footer ========== -->
+    <footer class="site-footer">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <a class="wordmark" href="#top"><img src="assets/icon.png" width="28" height="28" alt="" /><span>Piaz Switch</span></a>
+          <p>
+            <span lang="vi">Đổi tài khoản Claude Code &amp; Codex trong một cú bấm. Làm bởi</span>
+            <span lang="en">Switch Claude Code &amp; Codex accounts in one click. Made by</span>
+            <a href="#author">Ben Piaz</a>.
+          </p>
+          <div class="footer-social">
+            <a href="https://www.youtube.com/@benpiaz" target="_blank" rel="noopener" aria-label="YouTube @benpiaz"><svg><use href="#i-youtube" /></svg></a>
+            <a href="https://x.com/benpiazai" target="_blank" rel="noopener" aria-label="X @benpiazai"><svg><use href="#i-x" /></svg></a>
+            <a href="https://github.com/Benpiaz/piaz-switch" target="_blank" rel="noopener" aria-label="GitHub"><svg><use href="#i-github" /></svg></a>
+          </div>
+        </div>
+        <div class="footer-col">
+          <h4><span lang="vi">Sản phẩm</span><span lang="en">Product</span></h4>
+          <a href="#download"><span lang="vi">Tải về</span><span lang="en">Download</span></a>
+          <a href="#features"><span lang="vi">Tính năng</span><span lang="en">Features</span></a>
+          <a href="https://github.com/Benpiaz/piaz-switch/blob/main/CHANGELOG.md" target="_blank" rel="noopener"><span lang="vi">Có gì mới</span><span lang="en">Changelog</span></a>
+          <a href="https://github.com/Benpiaz/piaz-switch/releases" target="_blank" rel="noopener"><span lang="vi">Mọi phiên bản</span><span lang="en">All releases</span></a>
+        </div>
+        <div class="footer-col">
+          <h4><span lang="vi">Mã nguồn</span><span lang="en">Source</span></h4>
+          <a href="https://github.com/Benpiaz/piaz-switch" target="_blank" rel="noopener">GitHub</a>
+          <a href="https://github.com/Benpiaz/piaz-switch/issues" target="_blank" rel="noopener"><span lang="vi">Báo lỗi</span><span lang="en">Report a bug</span></a>
+          <a href="https://github.com/Benpiaz/piaz-switch/blob/main/LICENSE" target="_blank" rel="noopener"><span lang="vi">Giấy phép</span><span lang="en">License</span></a>
+          <a href="https://github.com/Benpiaz/piaz-switch/blob/main/SECURITY.md" target="_blank" rel="noopener"><span lang="vi">Bảo mật</span><span lang="en">Security</span></a>
+        </div>
+        <div class="footer-col">
+          <h4><span lang="vi">Tác giả</span><span lang="en">Author</span></h4>
+          <a href="https://www.youtube.com/@benpiaz" target="_blank" rel="noopener">YouTube @benpiaz</a>
+          <a href="https://x.com/benpiazai" target="_blank" rel="noopener">X @benpiazai</a>
+          <a href="https://github.com/Benpiaz" target="_blank" rel="noopener">GitHub @Benpiaz</a>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <span>© 2026 Ben Piaz · MIT + Commons Clause</span>
+        <span>
+          <span lang="vi">Không liên kết với Anthropic hay OpenAI. Claude Code và Codex là thương hiệu của chủ sở hữu tương ứng.</span>
+          <span lang="en">Not affiliated with Anthropic or OpenAI. Claude Code and Codex are trademarks of their owners.</span>
+        </span>
+      </div>
+    </footer>
+
+    <script src="main.js" defer></script>
+  </body>
+</html>

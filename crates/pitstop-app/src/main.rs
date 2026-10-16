@@ -7,6 +7,7 @@ mod app;
 mod commands;
 mod duty;
 mod i18n;
+mod links;
 mod model;
 mod settings;
 mod signin;
@@ -64,6 +65,7 @@ fn main() {
             updates::set_check_updates,
             updates::install_update,
             updates::open_releases,
+            links::open_link,
         ])
         .setup(move |tauri_app| {
             #[cfg(target_os = "macos")]

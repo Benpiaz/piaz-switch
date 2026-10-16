@@ -817,6 +817,19 @@ mod tests {
         assert!(notes(&lines).contains(&"Updated 23:58"));
     }
 
+    /// The tray puts the author's links just above these two lines.
+    #[test]
+    fn the_menu_ends_with_a_separator_and_quit() {
+        let engine = work_and_personal();
+        let lines = menu(&snapshot_of(&engine, &[]), Lang::En, &clock);
+        let n = lines.len();
+        assert_eq!(lines[n - 2], MenuLine::Separator);
+        assert!(
+            matches!(&lines[n - 1], MenuLine::Action { id, .. } if id == "quit"),
+            "{lines:?}"
+        );
+    }
+
     #[test]
     fn a_used_up_limit_says_when_it_resets() {
         let engine = work_and_personal();

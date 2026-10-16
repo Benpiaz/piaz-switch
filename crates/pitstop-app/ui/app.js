@@ -33,6 +33,15 @@ const rowKey = (provider, name) => `${provider}|${name}`;
 const NAME_RULE = /^[A-Za-z0-9_-]{1,64}$/;
 const APP_NAME = "Piaz Switch";
 
+// The project's links, opened by name: the app owns the addresses.
+const AUTHOR = "Ben Piaz";
+const LINKS = [
+  ["website", "globe", () => t("linkWebsite")],
+  ["repo", "github", () => "GitHub"],
+  ["youtube", "youtube", () => "YouTube @benpiaz"],
+  ["x", "xlogo", () => "X @benpiazai"],
+];
+
 // ---------- DOM ----------
 
 function h(tag, attrs, ...children) {
@@ -80,6 +89,14 @@ const ICONS = {
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21c-3.6 0-6.5-2.6-6.5-6.2 0-3.4 2.4-5.4 3.6-8.3.4 1.9 1.4 3 2.6 3.6C11.5 7 12.6 4.6 14.6 3c.3 3.2 3.9 5.6 3.9 11.2 0 3.9-2.9 6.8-6.5 6.8z"/><path d="M12 21c-1.6 0-2.8-1.2-2.8-2.8 0-1.8 1.5-2.6 2.2-4.2.9 1 3.4 2.2 3.4 4.4 0 1.5-1.2 2.6-2.8 2.6z"/></svg>',
   clock:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 2"/></svg>',
+  globe:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>',
+  github:
+    '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 .5C5.73.5.5 5.73.5 12a11.5 11.5 0 0 0 7.86 10.92c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.69 5.39-5.25 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 23.5 12C23.5 5.73 18.27.5 12 .5Z"/></svg>',
+  youtube:
+    '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.6 12 3.6 12 3.6s-7.5 0-9.4.5A3 3 0 0 0 .5 6.2 31 31 0 0 0 0 12a31 31 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.1c1.9.5 9.4.5 9.4.5s7.5 0 9.4-.5a3 3 0 0 0 2.1-2.1A31 31 0 0 0 24 12a31 31 0 0 0-.5-5.8ZM9.6 15.6V8.4l6.2 3.6-6.2 3.6Z"/></svg>',
+  xlogo:
+    '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>',
   mark: '<svg viewBox="0 0 32 32"><rect width="32" height="32" rx="9" fill="currentColor"/><g fill="none" stroke="#fff" stroke-width="2.3" stroke-linecap="round"><circle cx="16" cy="17.6" r="7.4"/><path d="M16 17.6v-4.4M16 17.6l3.1 2.2M13.4 6.6h5.2M16 6.6v3.4"/></g></svg>',
 };
 
@@ -351,7 +368,12 @@ function renderNav() {
     .getElementById("brand")
     .replaceChildren(
       h("span", { class: "brand-mark", "aria-hidden": "true" }, icon("mark")),
-      h("div", null, h("div", { class: "brand-name", text: APP_NAME }), snap ? h("div", { class: "brand-version", text: snap.version }) : null),
+      h(
+        "div",
+        null,
+        h("div", { class: "brand-name", text: APP_NAME }),
+        h("div", { class: "brand-version", text: snap ? `${snap.version} · ${t("byAuthor", { author: AUTHOR })}` : t("byAuthor", { author: AUTHOR }) }),
+      ),
     );
 }
 
@@ -1619,6 +1641,18 @@ function renderSettings() {
         ),
         h("p", { text: t("aboutPrivacy") }),
         h("p", { text: t("aboutAdding") }),
+        h(
+          "div",
+          { class: "about-author" },
+          h("p", { class: "about-made", text: t("madeBy", { author: AUTHOR }) }),
+          h(
+            "div",
+            { class: "about-links" },
+            LINKS.map(([name, glyph, label]) =>
+              h("button", { class: "button compact", onclick: () => invoke("open_link", { name }).catch((error) => openAlert(t("couldntOpen"), errorText(error))) }, icon(glyph), label()),
+            ),
+          ),
+        ),
       ),
     ),
   );

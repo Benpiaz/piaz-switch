@@ -56,6 +56,22 @@ impl Lang {
     pub fn quit(self) -> &'static str {
         self.pick("Quit Piaz Switch", "Thoát Piaz Switch")
     }
+    pub fn made_by(self, author: &str) -> String {
+        match self {
+            Lang::En => format!("Made by {author}"),
+            Lang::Vi => format!("Làm bởi {author}"),
+        }
+    }
+    /// A tray item for one of `links::LINKS`.
+    pub fn link(self, name: &str) -> &'static str {
+        match name {
+            "website" => self.pick("Piaz Switch Website", "Trang web Piaz Switch"),
+            "repo" => self.pick("Source on GitHub", "Mã nguồn trên GitHub"),
+            "youtube" => "YouTube @benpiaz",
+            "x" => "X @benpiazai",
+            _ => "",
+        }
+    }
     pub fn no_accounts(self) -> &'static str {
         self.pick("No accounts yet", "Chưa có tài khoản")
     }

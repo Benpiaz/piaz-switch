@@ -13,7 +13,9 @@ out — and see how much each account has left.**
 [![License: MIT + Commons Clause](https://img.shields.io/badge/license-MIT%20%2B%20Commons%20Clause-blue.svg)](LICENSE)
 ![Windows | macOS](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-lightgrey)
 
-[**Download**](#download) · [How it works](#how-it-works) · [Use the app](#use-the-app) · [Command line](#use-the-command-line) · [Tiếng Việt](#tiếng-việt)
+**[piaz-switch.vercel.app](https://piaz-switch.vercel.app)** · [**Download**](#download) · [How it works](#how-it-works) · [Use the app](#use-the-app) · [Command line](#use-the-command-line) · [Author](#author) · [Tiếng Việt](#tiếng-việt)
+
+Made by **Ben Piaz** · [YouTube @benpiaz](https://www.youtube.com/@benpiaz) · [X @benpiazai](https://x.com/benpiazai)
 
 </div>
 
@@ -240,6 +242,18 @@ To refresh the shipped table: `cargo run -p pitstop-core --example update-prices
 - Linux follows the Windows file paths and compiles (the app needs `webkit2gtk`),
   but is untested.
 
+## Author
+
+Piaz Switch is made by **Ben Piaz**, who shares about AI, Claude Code and building
+products with AI:
+
+- YouTube: [@benpiaz](https://www.youtube.com/@benpiaz)
+- X: [@benpiazai](https://x.com/benpiazai)
+- Website: [piaz-switch.vercel.app](https://piaz-switch.vercel.app)
+- Source: [github.com/Benpiaz/piaz-switch](https://github.com/Benpiaz/piaz-switch)
+
+The same links are in the app, under **Settings → About** and in the tray menu.
+
 ## License
 
 Piaz Switch is **free and source-available** under the [MIT license with the
@@ -265,7 +279,7 @@ trademarks of OpenAI.
 **Codex** chỉ bằng một cú bấm, không phải đăng xuất rồi đăng nhập lại, và xem mỗi
 tài khoản còn bao nhiêu hạn mức (5 giờ, tuần, theo model).
 
-**Tải về** ở mục [Download](#download) phía trên:
+**Tải về** tại trang [piaz-switch.vercel.app](https://piaz-switch.vercel.app) hoặc ở mục [Download](#download) phía trên:
 
 - **Windows**: tải `PiazSwitch-windows-x64-setup.exe` và chạy để cài. Nếu Windows
   hiện "Windows protected your PC", bấm **More info → Run anyway** (app chưa có chữ
@@ -292,3 +306,6 @@ hóa AES-256-GCM trên máy bạn, khóa nằm trong kho khóa của hệ điề
 **Giấy phép**: miễn phí, mã nguồn công khai (MIT + Commons Clause). Bạn được tải về,
 dùng (kể cả cho công việc), sửa và chia sẻ lại, nhưng **không được bán** app này
 hay bản sửa đổi của nó, hoặc dịch vụ thu phí dựa chủ yếu vào nó.
+
+**Tác giả**: **Ben Piaz** — theo dõi kênh YouTube [@benpiaz](https://www.youtube.com/@benpiaz)
+và X [@benpiazai](https://x.com/benpiazai) để nhận bản mới và mẹo dùng.
