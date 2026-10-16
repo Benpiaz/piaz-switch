@@ -36,6 +36,31 @@ people who use more than one **Claude Code** or **Codex CLI** account:
 
 English and Vietnamese interface; light and dark themes.
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/accounts-dark.png">
+    <img src="docs/screenshots/accounts-light.png" width="760" alt="Piaz Switch: every account with its 5-hour, weekly and per-model limits">
+  </picture>
+</p>
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/usage-dark.png">
+        <img src="docs/screenshots/usage-light.png" alt="Usage pane: cost at API prices and a daily chart per tool">
+      </picture>
+      <p align="center"><b>Usage</b>: tokens and cost at API prices, per tool and per day</p>
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/screenshots/settings-light.png" alt="Settings: automatic switching and warm-up">
+      <p align="center"><b>Automation</b>: switch before you run out, warm up the next window</p>
+    </td>
+  </tr>
+</table>
+
+<sub>Screenshots use sample accounts.</sub>
+
 ## Download
 
 | System | File |
