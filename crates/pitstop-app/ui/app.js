@@ -625,11 +625,17 @@ function metersOf(tool, account, moves) {
     const used = fresh ? 0 : w.percent;
     const percent = Math.max(0, Math.min(100, used));
     const level = used >= 100 ? " out" : used >= 75 ? " low" : "";
-    const fill = h("div", { class: "bar-fill" + level });
+    const fill = h("div", { class: "bar-fill" + level + (percent > 0 ? "" : " none") });
     fill.style.width = `${percent}%`;
     const bar = h("div", { class: "bar" }, fill);
     const pace = fresh ? null : paceOf(w, now);
     const off = pace && pace.standing !== "even";
+    if (off && pace.standing === "over" && percent < 100) {
+      // The part used ahead of pace, as a share of the fill so it scales with it.
+      const ahead = h("div", { class: "pace-over" });
+      ahead.style.width = `${(100 * (percent - pace.expected)) / percent}%`;
+      fill.append(ahead);
+    }
     if (off) {
       const mark = h("div", { class: "pace-mark" + (pace.standing === "over" ? " over" : "") });
       mark.style.left = `${pace.expected}%`;
@@ -641,7 +647,7 @@ function metersOf(tool, account, moves) {
     grid.append(
       h("span", { class: "meter-label", text: windowName(w.label) }),
       bar,
-      h("span", { class: "meter-figure", text: `${Math.round(used)}%` }),
+      h("span", { class: "meter-figure" }, String(Math.round(used)), h("span", { class: "unit", text: "%" })),
       h(
         "span",
         { class: "meter-meta" },
@@ -654,12 +660,16 @@ function metersOf(tool, account, moves) {
     const before = shownPercents.get(id);
     shownPercents.set(id, percent);
     if (before !== percent && !reducedMotion.matches) {
-      moves.push(() =>
-        fill.animate([{ width: `${before === undefined ? 0 : before}%` }, { width: `${percent}%` }], {
+      moves.push(() => {
+        // A limit that just reset drains to empty before it hides.
+        const draining = percent <= 0 && before > 0;
+        if (draining) fill.classList.remove("none");
+        const move = fill.animate([{ width: `${before === undefined ? 0 : before}%` }, { width: `${percent}%` }], {
           duration: before === undefined ? 700 : 450,
           easing: "cubic-bezier(0.165, 0.84, 0.44, 1)",
-        }),
-      );
+        });
+        if (draining) move.finished.then(() => fill.classList.add("none"), () => {});
+      });
     }
   }
   return grid;

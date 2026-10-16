@@ -224,6 +224,9 @@
   --fill-soft-hover: rgba(29, 29, 31, 0.1);
   --field: rgba(255, 255, 255, 0.5);
   --track: rgba(29, 29, 31, 0.08);
+  --track-notch: rgba(29, 29, 31, 0.07);
+  --track-inset: inset 0 1px 1.5px rgba(29, 29, 31, 0.1);
+  --pace-mark: #48484a;
   --seg-track: rgba(29, 29, 31, 0.05);
   --switch-off: rgba(29, 29, 31, 0.2);
   --switch-off-hover: rgba(29, 29, 31, 0.35);
@@ -304,6 +307,9 @@
   --fill-soft-hover: rgba(255, 255, 255, 0.14);
   --field: rgba(255, 255, 255, 0.05);
   --track: rgba(255, 255, 255, 0.1);
+  --track-notch: rgba(255, 255, 255, 0.07);
+  --track-inset: inset 0 1px 2px rgba(0, 0, 0, 0.35), inset 0 0 0 var(--hair) rgba(255, 255, 255, 0.04);
+  --pace-mark: #d1d1d6;
   --seg-track: rgba(255, 255, 255, 0.05);
   --switch-off: rgba(255, 255, 255, 0.14);
   --switch-off-hover: rgba(255, 255, 255, 0.24);
@@ -846,13 +852,13 @@
   .meters {
     grid-column: 2 / -1;
     display: grid;
-    grid-template-columns: 78px minmax(64px, 1fr) 37px 206px;
+    grid-template-columns: 78px minmax(64px, 1fr) 42px 214px;
     align-items: center;
     column-gap: 12px;
-    row-gap: 8px;
-    margin-top: 12px;
+    row-gap: 10px;
+    margin-top: 14px;
     font-size: 13px;
-    line-height: 16px;
+    line-height: 20px;
     font-variant-numeric: tabular-nums;
   }
   .meter-label {
@@ -864,53 +870,97 @@
   }
   .bar {
     position: relative;
-    height: 6px;
+    height: 8px;
     border-radius: var(--r-pill);
-    background: var(--track);
+    background: linear-gradient(90deg, transparent calc(25% - 0.5px), var(--track-notch) calc(25% - 0.5px), var(--track-notch) calc(25% + 0.5px), transparent calc(25% + 0.5px)), linear-gradient(90deg, transparent calc(50% - 0.5px), var(--track-notch) calc(50% - 0.5px), var(--track-notch) calc(50% + 0.5px), transparent calc(50% + 0.5px)), linear-gradient(90deg, transparent calc(75% - 0.5px), var(--track-notch) calc(75% - 0.5px), var(--track-notch) calc(75% + 0.5px), transparent calc(75% + 0.5px)), var(--track);
+    box-shadow: var(--track-inset);
   }
   .bar-fill {
+    --meter: var(--ok);
     position: absolute;
     inset: 0 auto 0 0;
+    overflow: hidden;
     border-radius: inherit;
-    background: var(--ok);
+    background: var(--meter);
   }
   .bar-fill.low {
-    background: var(--warn);
+    --meter: var(--warn);
   }
   .bar-fill.out {
-    background: var(--bad);
+    --meter: var(--bad);
+  }
+  .meters .bar-fill:not(.none) {
+    min-width: 8px;
+  }
+  .meters .bar-fill.none {
+    visibility: hidden;
+  }
+  .pace-over {
+    position: absolute;
+    inset: 0 0 0 auto;
+    background: repeating-linear-gradient(-45deg, var(--bad) 0 3px, transparent 3px 6px);
+  }
+  @supports (color: color-mix(in oklab, red, red)) {
+    .bar-fill {
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0) 60%), linear-gradient(90deg, color-mix(in oklab, var(--meter) 62%, transparent), var(--meter));
+      box-shadow: 0 0 10px -1px color-mix(in oklab, var(--meter) 55%, transparent), inset 0 0 0 var(--hair) color-mix(in oklab, var(--meter) 70%, transparent);
+    }
+    .pace-over {
+      background: repeating-linear-gradient( -45deg, color-mix(in oklab, var(--bad) 85%, transparent) 0 3px, color-mix(in oklab, var(--bad) 45%, transparent) 3px 6px );
+    }
   }
   .pace-mark {
     position: absolute;
-    top: -3px;
-    bottom: -3px;
-    width: 2px;
-    margin-left: -1px;
-    border-radius: 1px;
-    background: var(--ink-2);
-    box-shadow: 0 0 0 1.5px var(--surface-card);
+    top: -4px;
+    bottom: -4px;
+    width: 3px;
+    margin-left: -1.5px;
+    border-radius: var(--r-pill);
+    background: var(--pace-mark);
+    box-shadow: 0 0 0 1.5px var(--surface-card), 0 1px 3px rgba(0, 0, 0, 0.25);
   }
   .pace-mark.over {
     background: var(--bad);
   }
   .meter-figure {
     text-align: right;
-    font-weight: var(--w-medium);
+    font-size: 14px;
+    font-weight: var(--w-semibold);
+    letter-spacing: -0.01em;
     color: var(--ink);
   }
+  .meter-figure .unit {
+    margin-left: 1px;
+    font-size: 11px;
+    font-weight: var(--w-medium);
+    color: var(--ink-3);
+  }
   .meter-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     min-width: 0;
     color: var(--ink-2);
     overflow: hidden;
-    text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .meter-resets + .meter-pace::before {
-    content: "·";
-    margin: 0 6px;
-    color: var(--ink-3);
+  .meter-resets {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .meter-pace {
+    flex: none;
+    padding: 0 8px;
+    border-radius: var(--r-pill);
+    background: var(--ok-tint);
+    color: var(--ok-ink);
+    font-size: 12px;
+    font-weight: var(--w-medium);
+    line-height: 20px;
   }
   .meter-pace.over {
+    background: var(--bad-tint);
     color: var(--bad-ink);
   }
   .notes {
@@ -963,7 +1013,7 @@
   }
   @media (max-width: 800px) {
     .meters {
-      grid-template-columns: 64px minmax(48px, 1fr) 37px;
+      grid-template-columns: 64px minmax(48px, 1fr) 42px;
       row-gap: 4px;
     }
     .meter-meta {
@@ -1288,7 +1338,7 @@
     margin-top: 16px;
   }
   .update-progress .bar-fill {
-    background: var(--accent);
+    --meter: var(--accent);
   }
   .update-progress .hint {
     margin-top: 0;
