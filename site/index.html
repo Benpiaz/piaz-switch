@@ -36,6 +36,20 @@
         } catch (e) {}
       })();
     </script>
+    <script>
+      // PostHog web analytics for this site only (the app itself sends nothing).
+      !function(t,e){var o,n,p,r;e.__SV||(window.posthog&&window.posthog.__loaded)||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+".people (stub)"},o="init capture register register_once register_for_session unregister unregister_for_session getFeatureFlag getFeatureFlagPayload isFeatureEnabled reloadFeatureFlags updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures on onFeatureFlags onSurveysLoaded onSessionId getSurveys getActiveMatchingSurveys renderSurvey canRenderSurvey canRenderSurveyAsync identify setPersonProperties group resetGroups setPersonPropertiesForFlags resetPersonPropertiesForFlags setGroupPropertiesForFlags resetGroupPropertiesForFlags reset get_distinct_id getGroups get_session_id get_session_replay_url alias set_config startSessionRecording stopSessionRecording sessionRecordingStarted captureException loadToolbar get_property getSessionProperty createPersonProfile opt_in_capturing opt_out_capturing has_opted_in_capturing has_opted_out_capturing clear_opt_in_out_capturing debug getPageViewId captureTraceFeedback captureTraceMetric".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
+      posthog.init("phc_xHNjqZBBYK2sCEaFrupAPbuKkN69bVVeirYPX88vMGDy", {
+        api_host: "https://us.i.posthog.com",
+        defaults: "2025-05-24",
+        person_profiles: "identified_only",
+      });
+      // Name the download clicks so they are easy to count: one event per installer.
+      document.addEventListener("click", function (e) {
+        var a = e.target.closest && e.target.closest('a[href*="/releases/latest/download/"]');
+        if (a) posthog.capture("download_clicked", { file: a.href.split("/").pop(), lang: document.documentElement.lang });
+      });
+    </script>
   </head>
   <body>
     <svg width="0" height="0" style="position: absolute" aria-hidden="true">
@@ -239,8 +253,8 @@
             <span class="card-icon"><svg><use href="#i-lock" /></svg></span>
             <h3><span lang="vi">Mã hoá trên đĩa</span><span lang="en">Encrypted on disk</span></h3>
             <p>
-              <span lang="vi">Login đã park được mã hoá AES-256-GCM trong <code>~/.pitstop/vault/</code>, khoá nằm trong Windows Credential Manager hoặc macOS Keychain.</span>
-              <span lang="en">Parked logins are AES-256-GCM encrypted in <code>~/.pitstop/vault/</code>, with the key in Windows Credential Manager or the macOS Keychain.</span>
+              <span lang="vi">Login đã park được mã hoá AES-256-GCM ngay trên máy bạn, khoá nằm trong Windows Credential Manager hoặc macOS Keychain.</span>
+              <span lang="en">Parked logins are AES-256-GCM encrypted on your computer, with the key in Windows Credential Manager or the macOS Keychain.</span>
             </p>
           </article>
           <article class="card">
@@ -353,15 +367,15 @@
               <span class="card-icon"><svg><use href="#i-terminal" /></svg></span>
               <h3><span lang="vi">Có cả dòng lệnh</span><span lang="en">A command line too</span></h3>
               <p>
-                <span lang="vi">Thích terminal? Lệnh <code>pitstop</code> làm được mọi thứ app làm: liệt kê, đổi, xem hạn mức.</span>
-                <span lang="en">Prefer the terminal? The <code>pitstop</code> command does what the app does: list, switch, check limits.</span>
+                <span lang="vi">Thích terminal? Lệnh <code>piaz-switch</code> làm được mọi thứ app làm: liệt kê, đổi, xem hạn mức.</span>
+                <span lang="en">Prefer the terminal? The <code>piaz-switch</code> command does what the app does: list, switch, check limits.</span>
               </p>
             </div>
-            <pre class="mock-term" aria-hidden="true"><span class="p">$</span> pitstop list
+            <pre class="mock-term" aria-hidden="true"><span class="p">$</span> piaz-switch list
 <span class="m">claude</span>  <span class="g">●</span> work      42% 5h · 67% week
         ○ personal  12% 5h · 31% week
 <span class="m">codex</span>   <span class="g">●</span> main      23% 5h · 41% week
-<span class="p">$</span> pitstop use claude personal
+<span class="p">$</span> piaz-switch use personal
 <span class="g">✓</span> Claude Code → personal</pre>
           </article>
 
@@ -482,8 +496,8 @@
         </div>
 
         <p class="dl-foot">
-          <span lang="vi">Cần thêm: <a href="https://docs.anthropic.com/en/docs/claude-code" target="_blank" rel="noopener">Claude Code</a> và/hoặc <a href="https://github.com/openai/codex" target="_blank" rel="noopener">Codex CLI</a>, đã đăng nhập một lần. Dòng lệnh <code>pitstop</code> có sẵn trong bản portable Windows và trên <a href="https://github.com/Benpiaz/piaz-switch/releases/latest" target="_blank" rel="noopener">trang release</a> cho macOS.</span>
-          <span lang="en">You also need <a href="https://docs.anthropic.com/en/docs/claude-code" target="_blank" rel="noopener">Claude Code</a> and/or the <a href="https://github.com/openai/codex" target="_blank" rel="noopener">Codex CLI</a>, signed in once. The <code>pitstop</code> command line ships in the Windows portable zip and on the <a href="https://github.com/Benpiaz/piaz-switch/releases/latest" target="_blank" rel="noopener">release page</a> for macOS.</span>
+          <span lang="vi">Cần thêm: <a href="https://docs.anthropic.com/en/docs/claude-code" target="_blank" rel="noopener">Claude Code</a> và/hoặc <a href="https://github.com/openai/codex" target="_blank" rel="noopener">Codex CLI</a>, đã đăng nhập một lần. Dòng lệnh <code>piaz-switch</code> có sẵn trong bản portable Windows và trên <a href="https://github.com/Benpiaz/piaz-switch/releases/latest" target="_blank" rel="noopener">trang release</a> cho macOS.</span>
+          <span lang="en">You also need <a href="https://docs.anthropic.com/en/docs/claude-code" target="_blank" rel="noopener">Claude Code</a> and/or the <a href="https://github.com/openai/codex" target="_blank" rel="noopener">Codex CLI</a>, signed in once. The <code>piaz-switch</code> command line ships in the Windows portable zip and on the <a href="https://github.com/Benpiaz/piaz-switch/releases/latest" target="_blank" rel="noopener">release page</a> for macOS.</span>
         </p>
       </section>
 

@@ -75,7 +75,8 @@ jobs:
             update="PiazSwitch-windows-${{ matrix.arch }}-setup.exe"
             name="PiazSwitch-windows-${{ matrix.arch }}-portable"
             mkdir "$name"
-            cp "$dir/pitstop-app.exe" "$dir/pitstop.exe" README.md LICENSE "$name/"
+            cp "$dir/pitstop-app.exe" "$name/Piaz Switch.exe"
+            cp "$dir/piaz-switch.exe" README.md LICENSE "$name/"
             7z a "dist/$name.zip" "$name" >/dev/null
           else
             sh crates/pitstop-app/macos/bundle.sh "$dir/pitstop-app"
@@ -87,9 +88,9 @@ jobs:
             # What the updater installs: the app bundle alone, no ._ files.
             update="PiazSwitch-macos-${{ matrix.arch }}.app.tar.gz"
             COPYFILE_DISABLE=1 tar czf "dist/$update" -C "$dir" "Piaz Switch.app"
-            name="pitstop-cli-macos-${{ matrix.arch }}"
+            name="piaz-switch-cli-macos-${{ matrix.arch }}"
             mkdir "$name"
-            cp "$dir/pitstop" README.md LICENSE "$name/"
+            cp "$dir/piaz-switch" README.md LICENSE "$name/"
             tar czf "dist/$name.tar.gz" "$name"
           fi
           cd dist

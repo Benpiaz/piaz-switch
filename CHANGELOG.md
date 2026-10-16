@@ -8,6 +8,15 @@
   @benpiazai) in **Settings → About** and in a **Made by Ben Piaz** submenu of
   the tray menu; the sidebar says "by Ben Piaz" under the version.
 
+### Changed
+- The command line is now `piaz-switch` (it was `pitstop`). The Windows portable
+  zip holds `Piaz Switch.exe` and `piaz-switch.exe`, and the macOS command line
+  ships as `piaz-switch-cli-macos-<arch>.tar.gz`. Messages and help say
+  Piaz Switch throughout. Parked logins stay where they are (`~/.pitstop`), so
+  nothing needs adding again. With the portable zip and **Open at login** on,
+  turn that setting off and on again once in the new copy, so it starts
+  `Piaz Switch.exe` instead of the old `pitstop-app.exe`.
+
 ## [0.3.0] - 2026-10-16
 
 ### Added

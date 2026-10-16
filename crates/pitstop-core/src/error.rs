@@ -5,16 +5,16 @@ pub enum Error {
     #[error("not logged in to {0} — sign in with the tool first, then enroll")]
     NotLoggedIn(String),
     #[error(
-        "account `{0}` already exists for {1}; pick another name or `pitstop remove {0}` first"
+        "account `{0}` already exists for {1}; pick another name or `piaz-switch remove {0}` first"
     )]
     DuplicateAccount(String, String),
     #[error(
-        "this {provider} login is already enrolled as `{name}`; to add another account, sign in to it with `pitstop enroll <name> --sign-in`"
+        "this {provider} login is already enrolled as `{name}`; to add another account, sign in to it with `piaz-switch enroll <name> --sign-in`"
     )]
     AlreadyEnrolled { name: String, provider: String },
     #[error("that sign-in was {}, not `{name}`; sign in with `{name}`'s account", label.as_deref().unwrap_or("another account"))]
     WrongAccount { name: String, label: Option<String> },
-    #[error("no account named `{0}` — see `pitstop list`")]
+    #[error("no account named `{0}` — see `piaz-switch list`")]
     UnknownAccount(String),
     #[error("account name `{0}` is ambiguous across providers; pass --provider")]
     AmbiguousAccount(String),

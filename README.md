@@ -21,7 +21,7 @@ Made by **Ben Piaz** · [YouTube @benpiaz](https://www.youtube.com/@benpiaz) · 
 
 ---
 
-Piaz Switch is a free tray / menu bar app (plus a `pitstop` command line) for
+Piaz Switch is a free tray / menu bar app (plus a `piaz-switch` command line) for
 people who use more than one **Claude Code** or **Codex CLI** account:
 
 - **Switch accounts instantly** from the tray menu; open Claude Code sessions follow.
@@ -32,7 +32,8 @@ people who use more than one **Claude Code** or **Codex CLI** account:
 - **See what you used and what it would cost** at API prices, from the logs on your
   own computer.
 - **Private by design**: no server, no telemetry, no account of ours. Parked logins
-  are AES-256-GCM encrypted on disk (`~/.pitstop/vault/`), with the key in the OS
+  are AES-256-GCM encrypted on disk (`~/.pitstop/vault/`; the folder keeps the project's first name so
+  existing logins keep working), with the key in the OS
   keystore (Windows Credential Manager / macOS Keychain). Each login only ever goes
   to the service that issued it.
 
@@ -68,7 +69,7 @@ English and Vietnamese interface; light and dark themes.
 | System | File |
 |---|---|
 | **Windows 10/11** (64-bit) | [**PiazSwitch-windows-x64-setup.exe**](https://github.com/Benpiaz/piaz-switch/releases/latest/download/PiazSwitch-windows-x64-setup.exe) — installer |
-| | [PiazSwitch-windows-x64-portable.zip](https://github.com/Benpiaz/piaz-switch/releases/latest/download/PiazSwitch-windows-x64-portable.zip) — no install, includes `pitstop.exe` |
+| | [PiazSwitch-windows-x64-portable.zip](https://github.com/Benpiaz/piaz-switch/releases/latest/download/PiazSwitch-windows-x64-portable.zip) — no install, includes the `piaz-switch.exe` command line |
 | **macOS 11+** Apple Silicon (M1–M4) | [**PiazSwitch-macos-arm64.dmg**](https://github.com/Benpiaz/piaz-switch/releases/latest/download/PiazSwitch-macos-arm64.dmg) |
 | **macOS 11+** Intel | [**PiazSwitch-macos-x64.dmg**](https://github.com/Benpiaz/piaz-switch/releases/latest/download/PiazSwitch-macos-x64.dmg) |
 
@@ -123,7 +124,7 @@ Needs [Rust](https://rustup.rs) (stable).
 
 ```sh
 cargo build --release -p pitstop-app   # the app: target/release/pitstop-app
-cargo build --release -p pitstop-cli   # command line: target/release/pitstop
+cargo build --release -p pitstop-cli   # command line: target/release/piaz-switch
 ```
 
 On macOS, build on a Mac (same commands), then wrap the app so it opens from
@@ -142,7 +143,7 @@ development.
 
 ## Use the app
 
-Start Piaz Switch (`pitstop-app.exe` on Windows, `Piaz Switch.app` on macOS). It lives in the system tray
+Start Piaz Switch (from the Start menu on Windows, or `Piaz Switch.exe` from the portable zip; `Piaz Switch.app` on macOS). It lives in the system tray
 / menu bar:
 
 - **Click the icon** for the menu: your accounts by tool, a check on the one in
@@ -175,15 +176,15 @@ Closing the window keeps Piaz Switch in the tray; **Quit** is in the tray menu.
 ## Use the command line
 
 ```sh
-pitstop enroll work --provider claude-code             # park the login the tool is using now
-pitstop enroll personal --provider claude-code --sign-in   # sign in to another account, leaving that one alone
-pitstop enroll main --provider codex --sign-in
+piaz-switch enroll work --provider claude-code                 # park the login the tool is using now
+piaz-switch enroll personal --provider claude-code --sign-in   # sign in to another account, leaving that one alone
+piaz-switch enroll main --provider codex --sign-in
 
-pitstop                 # list accounts, * marks active, usage under each
-pitstop list --offline  # same, without asking Anthropic / OpenAI for usage
-pitstop use work        # switch
-pitstop rename work job # rename, keeping the parked login
-pitstop remove job      # forget an account and delete its parked credential
+piaz-switch                    # list accounts, * marks active, usage under each
+piaz-switch list --offline     # same, without asking Anthropic / OpenAI for usage
+piaz-switch use work           # switch
+piaz-switch rename work job    # rename, keeping the parked login
+piaz-switch remove job         # forget an account and delete its parked credential
 ```
 
 ### Usage (best-effort)
@@ -237,7 +238,7 @@ To refresh the shipped table: `cargo run -p pitstop-core --example update-prices
 - Claude Code on Windows can be switched to Windows Credential Manager (behind a
   feature flag). Piaz Switch reads and writes `.credentials.json`, so it does not see a
   login kept there.
-- If the `pitstop` entry in your OS keystore is deleted, parked credentials cannot be
+- If Piaz Switch's entry in your OS keystore (named `pitstop`) is deleted, parked credentials cannot be
   decrypted — add each account again.
 - Linux follows the Windows file paths and compiles (the app needs `webkit2gtk`),
   but is untested.

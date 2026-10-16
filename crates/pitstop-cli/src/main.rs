@@ -8,7 +8,7 @@ use pitstop_core::{signin, Engine, ProviderId, RealHost, State};
 
 /// Park and switch Claude Code / Codex accounts without signing out.
 #[derive(Parser)]
-#[command(name = "pitstop", version, about)]
+#[command(name = "piaz-switch", version, about)]
 struct Cli {
     /// Treat this directory as the home directory (sandbox/testing).
     #[arg(long, global = true)]
@@ -71,7 +71,7 @@ fn parse_provider(s: Option<&str>) -> Result<Option<ProviderId>> {
 fn print_list(state: &State, usage: &[AccountUsage]) {
     if state.accounts.is_empty() {
         println!("No accounts enrolled yet. Park the login a tool is using with:");
-        println!("  pitstop enroll <name> --provider claude-code|codex");
+        println!("  piaz-switch enroll <name> --provider claude-code|codex");
         println!("or sign in to another account with --sign-in.");
         return;
     }
@@ -165,7 +165,7 @@ fn main() {
                 let login = signin::take_login(engine.host(), provider, dir.path())?;
                 let meta = engine.add_signed_in(provider, &name, &login)?;
                 println!(
-                    "Enrolled `{name}` ({}). Switch to it with: pitstop use {name}",
+                    "Enrolled `{name}` ({}). Switch to it with: piaz-switch use {name}",
                     meta.label.as_deref().unwrap_or("no email found"),
                 );
             }
@@ -182,7 +182,7 @@ fn main() {
                         println!("Switched {} to `{name}`.", provider.display_name());
                         if let Some(replaced) = replaced {
                             println!(
-                                "Note: {} was signed in as {}, which pitstop does not manage; that login was replaced, not parked.",
+                                "Note: {} was signed in as {}, which Piaz Switch does not manage; that login was replaced, not parked.",
                                 provider.display_name(),
                                 replaced.label.as_deref().unwrap_or("an unknown account"),
                             );
@@ -210,7 +210,7 @@ fn main() {
                 match engine.remove(&name, parse_provider(provider.as_deref())?)? {
                     RemoveOutcome::Removed => println!("Removed `{name}`."),
                     RemoveOutcome::RemovedActive => println!(
-                        "Removed `{name}` from pitstop. The tool's live login was left untouched."
+                        "Removed `{name}` from Piaz Switch. The tool's live login was left untouched."
                     ),
                 }
             }

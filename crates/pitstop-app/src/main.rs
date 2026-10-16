@@ -90,7 +90,7 @@ fn main() {
             }
         })
         .build(tauri::generate_context!())
-        .expect("error while building Pitstop")
+        .expect("error while building Piaz Switch")
         .run(|_handle, _event: RunEvent| {
             #[cfg(target_os = "macos")]
             if let RunEvent::Reopen { .. } = _event {

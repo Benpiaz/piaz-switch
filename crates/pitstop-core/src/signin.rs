@@ -228,7 +228,7 @@ pub fn take_login(host: &dyn Host, provider: ProviderId, dir: &Path) -> Result<V
     match read? {
         Some(login) => Ok(login.blob),
         None => Err(Error::SignIn(format!(
-            "{} finished signing in, but Pitstop found no login it saved",
+            "{} finished signing in, but Piaz Switch found no login it saved",
             provider.display_name()
         ))),
     }

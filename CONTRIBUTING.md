@@ -21,7 +21,7 @@ Layout:
 | Crate | What |
 |---|---|
 | `crates/pitstop-core` | accounts, vault, switching, usage, the Usage pane's log reader |
-| `crates/pitstop-cli` | the `pitstop` command line |
+| `crates/pitstop-cli` | the `piaz-switch` command line |
 | `crates/pitstop-app` | the Tauri 2 app (tray + window); UI in `ui/` |
 
 ```sh
