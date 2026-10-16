@@ -250,10 +250,9 @@ impl PrivateDir {
 
     /// The same, named `pitstop-<purpose>-…` so what it is for shows.
     pub fn create_for(provider: ProviderId, purpose: &str) -> Result<PrivateDir> {
-        use aes_gcm::aead::rand_core::RngCore;
+        use aes_gcm::aead::Generate;
 
-        let mut bytes = [0u8; 8];
-        aes_gcm::aead::OsRng.fill_bytes(&mut bytes);
+        let bytes = <[u8; 8]>::generate();
         let suffix: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
         let path = std::env::temp_dir().join(format!("pitstop-{purpose}-{suffix}"));
         #[cfg_attr(not(unix), allow(unused_mut))]
