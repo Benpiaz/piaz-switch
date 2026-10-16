@@ -1,0 +1,492 @@
+/* The Usage pane, on the window's own tokens (app.css). Each tool keeps one
+   colour wherever it is drawn: the chart, its dot, its mark. The pair was
+   checked for colour-vision separation on both themes' panels. */
+
+:root {
+  --tool-claude-code: #d97757;
+  --tool-codex: #00879c;
+}
+
+:root[data-theme="dark"] {
+  --tool-claude-code: #c46848;
+  --tool-codex: #26a0b2;
+}
+
+/* ---------- header ---------- */
+
+.pane-title h1 .crumb-sep {
+  margin: 0 8px;
+  color: var(--ink-3);
+  font-weight: 400;
+}
+
+.crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 28px;
+  margin: -4px 0;
+  padding: 0 4px 0 8px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  transition: background var(--dur-base) var(--ease-out);
+}
+
+.crumb:hover {
+  background: var(--fill-hover);
+}
+
+.crumb:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.crumb svg {
+  width: 16px;
+  height: 16px;
+  color: var(--ink-2);
+}
+
+/* Segmented choices outside a dialog size to their longest label: equal
+   columns (the sliding thumb needs them equal), never squeezed. */
+.toolbar .segmented,
+.breakdown-head .segmented {
+  display: inline-grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  width: auto;
+  height: 30px;
+  flex: none;
+  /* The shared style makes a segmented choice a size container, which takes
+     its labels out of its width: sized to content, it would collapse. */
+  container-type: normal;
+}
+
+.toolbar .segmented button,
+.breakdown-head .segmented button {
+  overflow: visible;
+  padding: 0 12px;
+  font-size: 12.5px;
+}
+
+/* The Usage header holds two choices and Refresh: on a narrow window they
+   move under the title instead of crowding it. */
+.pane-head:has(.crumb) {
+  flex-wrap: wrap;
+  row-gap: 10px;
+}
+
+/* Down to the narrowest window the two choices still don't fit on one line:
+   the periods go under the tabs, Refresh stays with them. */
+.pane-head:has(.crumb) .toolbar {
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  row-gap: 8px;
+  min-width: 0;
+}
+
+/* At the narrowest window the periods and Refresh miss one line by a hair. */
+@media (max-width: 720px) {
+  .toolbar .segmented button {
+    padding: 0 10px;
+  }
+}
+
+/* While a new report is read, the old one stays, dimmed, without jumping. */
+.pane.refetching .usage {
+  opacity: 0.6;
+  transition: opacity var(--dur-base) var(--ease-out);
+}
+
+/* ---------- summary and chart ---------- */
+
+.usage {
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+  padding-top: 4px;
+}
+
+.usage-top {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  gap: 24px;
+  padding: 20px 20px 16px;
+}
+
+@media (max-width: 1000px) {
+  .usage-top {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.hero {
+  font-size: 44px;
+  line-height: 52px;
+  font-weight: var(--w-semibold);
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+
+.hero-sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+
+.dot-sep {
+  color: var(--ink-3);
+}
+
+.estimate {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: var(--r-sm);
+  cursor: help;
+}
+
+.estimate:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.estimate svg {
+  width: 14px;
+  height: 14px;
+  color: var(--ink-3);
+}
+
+.tool-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 20px;
+}
+
+.tool-line {
+  display: grid;
+  grid-template-columns: 8px 18px minmax(0, 1fr) auto;
+  column-gap: 8px;
+  row-gap: 2px;
+  align-items: center;
+}
+
+.series-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.series-dot.claude-code,
+.tip-key.claude-code {
+  background: var(--tool-claude-code);
+}
+
+.series-dot.codex,
+.tip-key.codex {
+  background: var(--tool-codex);
+}
+
+.tool-mark {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  flex: none;
+}
+
+.tool-mark svg {
+  width: 16px;
+  height: 16px;
+}
+
+.tool-mark.claude-code {
+  color: var(--tool-claude-code);
+}
+
+.tool-mark.codex {
+  color: var(--tool-codex);
+}
+
+.tool-name {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  font-size: 14.5px;
+  font-weight: var(--w-medium);
+}
+
+.tool-sessions {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.tool-value {
+  font-weight: var(--w-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+.tool-detail {
+  grid-column: 3 / -1;
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+
+.usage-chart {
+  position: relative;
+  min-width: 0;
+}
+
+.chart-title {
+  margin: 0 0 8px;
+  font-size: 13.5px;
+  font-weight: var(--w-semibold);
+}
+
+.chart-plot {
+  height: 196px;
+}
+
+.chart {
+  display: block;
+  overflow: visible;
+  border-radius: var(--r-sm);
+}
+
+.chart:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.chart .grid {
+  stroke: var(--line);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+.chart .tick {
+  font-size: 11px;
+  fill: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.chart .line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.chart .area {
+  stroke: none;
+  opacity: 0.12;
+}
+
+.chart .claude-code .line {
+  stroke: var(--tool-claude-code);
+}
+
+.chart .claude-code .area,
+.chart .dot.claude-code {
+  fill: var(--tool-claude-code);
+}
+
+.chart .codex .line {
+  stroke: var(--tool-codex);
+}
+
+.chart .codex .area,
+.chart .dot.codex {
+  fill: var(--tool-codex);
+}
+
+.chart .dot {
+  stroke: var(--surface-card);
+  stroke-width: 2;
+}
+
+.chart .guide {
+  stroke: var(--line-strong);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+.chart .hit {
+  fill: transparent;
+  cursor: crosshair;
+}
+
+.chart-tip {
+  position: absolute;
+  top: 30px;
+  z-index: 2;
+  min-width: 140px;
+  padding: 8px 10px;
+  border-radius: var(--r-md);
+  background: var(--surface-float);
+  box-shadow: var(--shadow-float);
+  font-size: 12.5px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--dur-snap) var(--ease-out);
+}
+
+.chart-tip.shown {
+  opacity: 1;
+}
+
+.tip-when {
+  margin-bottom: 4px;
+  color: var(--ink-2);
+}
+
+.tip-row {
+  display: grid;
+  grid-template-columns: 12px auto 1fr;
+  align-items: center;
+  gap: 8px;
+  line-height: 20px;
+}
+
+.tip-row strong {
+  font-weight: var(--w-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+.tip-row span:last-child {
+  color: var(--ink-2);
+}
+
+.tip-key {
+  width: 12px;
+  height: 2px;
+  border-radius: 1px;
+}
+
+/* ---------- totals ---------- */
+
+/* Six figures in two even rows of three: the pane's column is too narrow
+   for six labels side by side in every language. */
+.totals {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.tile {
+  padding: 14px 16px;
+}
+
+.tile-label {
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.tile-value {
+  margin-top: 2px;
+  font-size: 20px;
+  line-height: 26px;
+  font-weight: var(--w-semibold);
+}
+
+/* ---------- breakdown ---------- */
+
+.breakdown-head {
+  justify-content: space-between;
+}
+
+.breakdown-head h2 {
+  margin: 0;
+  font: inherit;
+}
+
+.table-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 104px 76px 76px;
+  column-gap: 12px;
+  align-items: center;
+  padding: 11px 16px;
+  font-size: 13.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.table-row > span:not(:first-child) {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.table-row + .table-row::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 16px;
+  right: 16px;
+  height: var(--hair, 1px);
+  background: var(--line);
+}
+
+.table-row:not(.table-head):hover {
+  background: var(--fill-hover);
+}
+
+.table-head {
+  padding-top: 10px;
+  padding-bottom: 8px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.cell-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.model-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.unpriced {
+  color: var(--ink-2);
+}
+
+.table-empty {
+  margin: 0;
+  padding: 18px 16px;
+  color: var(--ink-2);
+}
+
+.prices-note {
+  margin: 8px 2px 0;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+@media (max-width: 720px) {
+  .table-row {
+    grid-template-columns: minmax(0, 1fr) 88px 60px 64px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chart-tip,
+  .pane.refetching .usage {
+    transition: none;
+  }
+}

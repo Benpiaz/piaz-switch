@@ -1,0 +1,8 @@
+/target
+*.pdb
+.DS_Store
+.idea/
+.vscode/
+crates/pitstop-app/gen/
+
+node_modules/

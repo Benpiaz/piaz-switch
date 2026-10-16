@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Piaz Switch</title>
+    <link rel="stylesheet" href="app.css" />
+    <link rel="stylesheet" href="usage.css" />
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="sidebar-top" data-tauri-drag-region></div>
+        <nav class="nav" id="nav"></nav>
+        <div class="brand" id="brand"></div>
+      </aside>
+      <main class="main">
+        <header class="pane-head" data-tauri-drag-region>
+          <div class="pane-title" data-tauri-drag-region>
+            <h1 id="title"></h1>
+            <p class="status" id="status"></p>
+          </div>
+          <div class="toolbar" id="toolbar"></div>
+        </header>
+        <section class="pane" id="pane"></section>
+      </main>
+    </div>
+    <div id="overlay-root"></div>
+    <div class="sr-only" id="announcer" aria-live="polite"></div>
+    <script src="i18n.js"></script>
+    <script src="app.js"></script>
+    <script src="usage.js"></script>
+  </body>
+</html>

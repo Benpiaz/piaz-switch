@@ -1,0 +1,30 @@
+[package]
+name = "pitstop-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "pitstop-app"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+pitstop-core = { path = "../pitstop-core" }
+# custom-protocol: the window always loads the bundled `ui/`; there is no dev server.
+tauri = { version = "2", features = ["tray-icon", "image-png", "custom-protocol"] }
+tauri-plugin-single-instance = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-notification = "2"
+serde.workspace = true
+serde_json.workspace = true
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+sys-locale = "0.3"
+dirs = "6"
+
+[dev-dependencies]
+base64.workspace = true
+tempfile = "3"

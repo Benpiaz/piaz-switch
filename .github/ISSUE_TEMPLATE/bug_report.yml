@@ -1,0 +1,54 @@
+name: Bug report
+description: Something doesn't work as it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. **Never paste tokens, `.credentials.json`, `auth.json` or files from `~/.pitstop/vault/`.**
+        Security problems: please use [a private advisory](https://github.com/Benpiaz/piaz-switch/security/advisories/new) instead.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: And what did you expect instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the tray menu
+        2. Choose account ...
+  - type: input
+    id: version
+    attributes:
+      label: Piaz Switch version
+      placeholder: "0.2.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows 11
+        - Windows 10
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: tool
+    attributes:
+      label: Tool
+      multiple: true
+      options:
+        - Claude Code
+        - Codex CLI
+  - type: textarea
+    id: extra
+    attributes:
+      label: Screenshots or anything else

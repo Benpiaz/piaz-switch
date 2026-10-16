@@ -1,0 +1,13 @@
+{
+  "name": "pitstop-app-ui",
+  "private": true,
+  "description": "Builds the window's stylesheet (ui/app.css) from Tailwind CSS v4 sources. The compiled file is committed, so building the app needs no Node.",
+  "scripts": {
+    "build": "tailwindcss --input app.css --output ../ui/app.css",
+    "watch": "tailwindcss --input app.css --output ../ui/app.css --watch"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "4.3.3",
+    "tailwindcss": "4.3.3"
+  }
+}

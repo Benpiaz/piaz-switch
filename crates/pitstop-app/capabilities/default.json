@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The Pitstop window: Pitstop's own commands, events, and dragging the window by its header.",
+  "windows": ["main"],
+  "permissions": ["core:default", "core:window:allow-start-dragging", "notification:default"]
+}

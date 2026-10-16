@@ -1,0 +1,120 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            arch: x64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            arch: arm64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            arch: x64
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build (Windows installer)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          cargo build --release -p pitstop-cli --target ${{ matrix.target }}
+          cd crates/pitstop-app
+          npx --yes @tauri-apps/cli@^2 build --bundles nsis --target ${{ matrix.target }}
+
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
+        run: cargo build --release --workspace --target ${{ matrix.target }}
+
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir="target/${{ matrix.target }}/release"
+          mkdir dist
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            cp "$dir"/bundle/nsis/*-setup.exe "dist/PiazSwitch-windows-${{ matrix.arch }}-setup.exe"
+            name="PiazSwitch-windows-${{ matrix.arch }}-portable"
+            mkdir "$name"
+            cp "$dir/pitstop-app.exe" "$dir/pitstop.exe" README.md LICENSE "$name/"
+            7z a "dist/$name.zip" "$name" >/dev/null
+          else
+            crates/pitstop-app/macos/bundle.sh "$dir/pitstop-app"
+            mkdir dmg
+            cp -R "$dir/Piaz Switch.app" dmg/
+            ln -s /Applications dmg/Applications
+            hdiutil create -volname "Piaz Switch" -srcfolder dmg -ov -format UDZO \
+              "dist/PiazSwitch-macos-${{ matrix.arch }}.dmg"
+            name="pitstop-cli-macos-${{ matrix.arch }}"
+            mkdir "$name"
+            cp "$dir/pitstop" README.md LICENSE "$name/"
+            tar czf "dist/$name.tar.gz" "$name"
+          fi
+          cd dist
+          if command -v sha256sum >/dev/null; then sum="sha256sum"; else sum="shasum -a 256"; fi
+          for f in *; do $sum "$f" > "$f.sha256"; done
+          ls -la
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.target }}
+          path: dist/*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+      - name: Release notes from CHANGELOG.md
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="$version" '
+            $0 ~ "^## \\[" v "\\]" { found = 1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          cat >> notes.md <<'EOF'
+
+          ## Download
+
+          | System | File |
+          |---|---|
+          | Windows 10/11 (64-bit) | `PiazSwitch-windows-x64-setup.exe` (installer) or `PiazSwitch-windows-x64-portable.zip` |
+          | macOS 11+, Apple Silicon | `PiazSwitch-macos-arm64.dmg` |
+          | macOS 11+, Intel | `PiazSwitch-macos-x64.dmg` |
+
+          The app is not code-signed yet. Windows: **More info → Run anyway**. macOS: right-click the app → **Open** the first time.
+          Each file has a `.sha256` checksum next to it.
+          EOF
+          cat notes.md
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: Piaz Switch ${{ github.ref_name }}
+          body_path: notes.md
+          files: dist/*

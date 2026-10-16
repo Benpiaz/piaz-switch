@@ -1,0 +1,15 @@
+[package]
+name = "pitstop-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "pitstop"
+path = "src/main.rs"
+
+[dependencies]
+pitstop-core = { path = "../pitstop-core" }
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+dirs = "6"

@@ -1,0 +1,49 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Piaz Switch",
+  "identifier": "io.github.benpiaz.pitstop",
+  "build": {
+    "frontendDist": "ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Piaz Switch",
+        "width": 860,
+        "height": 640,
+        "minWidth": 640,
+        "minHeight": 460,
+        "center": true,
+        "visible": false,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "nsis"],
+    "category": "DeveloperTool",
+    "publisher": "Benpiaz",
+    "copyright": "Copyright (c) 2026 Benpiaz. MIT with the Commons Clause.",
+    "homepage": "https://github.com/Benpiaz/piaz-switch",
+    "license": "LicenseRef-MIT-Commons-Clause",
+    "licenseFile": "../../LICENSE",
+    "shortDescription": "Switch Claude Code and Codex accounts",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "11.0"
+    }
+  }
+}
