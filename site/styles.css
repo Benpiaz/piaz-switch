@@ -1324,26 +1324,12 @@ main:focus {
   color: #fff;
   background: linear-gradient(var(--accent-hi), var(--accent));
 }
-.install-warn {
-  display: block;
-  margin-top: 8px;
-  padding: 6px 10px;
-  border-radius: 10px;
-  font-size: 13.5px;
-  color: #9a3412;
-  background: #fff1e6;
-}
-.install-alt {
-  margin: 16px 0 8px;
-  font-size: 14px;
+.install-steps .mac-cmd {
+  margin-top: 10px;
 }
 .install-dialog .mac-cmd code {
   white-space: normal;
   overflow-wrap: anywhere;
-}
-.install-more {
-  margin: 10px 0 0;
-  font-size: 14px;
 }
 .install-foot {
   display: flex;

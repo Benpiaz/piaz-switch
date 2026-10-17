@@ -753,21 +753,16 @@
         <h3><span lang="vi">Cài đặt trên Mac</span><span lang="en">Install on a Mac</span></h3>
         <ol class="install-steps">
           <li><span lang="vi">Mở file <b>.dmg</b> vừa tải, kéo <b>Piaz Switch</b> vào <b>Applications</b>.</span><span lang="en">Open the <b>.dmg</b> and drag <b>Piaz Switch</b> into <b>Applications</b>.</span></li>
-          <li><span lang="vi">Mở app. Mac sẽ báo <i>“Apple could not verify…”</i>: bấm <b>Done</b> (macOS cũ: <b>Cancel</b>/<b>OK</b>).</span><span lang="en">Open the app. Your Mac says <i>“Apple could not verify…”</i>: click <b>Done</b> (older macOS: <b>Cancel</b>/<b>OK</b>).</span>
-            <span class="install-warn"><span lang="vi">⚠️ Đừng bấm <b>Move to Trash</b>.</span><span lang="en">⚠️ Don't click <b>Move to Trash</b>.</span></span>
+          <li>
+            <span lang="vi">Mở <b>Terminal</b> (bấm <b>⌘ Space</b>, gõ “Terminal”, Enter), dán lệnh này vào rồi nhấn <b>Enter</b>:</span>
+            <span lang="en">Open <b>Terminal</b> (press <b>⌘ Space</b>, type “Terminal”, Enter), paste this command and press <b>Enter</b>:</span>
+            <div class="mac-cmd">
+              <code data-copy-source>xattr -dr com.apple.quarantine "/Applications/Piaz Switch.app"</code>
+              <button class="ghost-button mac-copy" type="button" data-copy><span lang="vi">Sao chép</span><span lang="en">Copy</span></button>
+            </div>
           </li>
-          <li><span lang="vi">Vào <b>System Settings → Privacy &amp; Security</b> (macOS 12 trở xuống: <b>System Preferences → Security &amp; Privacy</b>), kéo xuống, bấm <b>Open Anyway</b> rồi xác nhận bằng mật khẩu máy.</span><span lang="en">Go to <b>System Settings → Privacy &amp; Security</b> (macOS 12 and older: <b>System Preferences → Security &amp; Privacy</b>), scroll down, click <b>Open Anyway</b> and confirm with your password.</span></li>
-          <li><span lang="vi">Xong! Biểu tượng app nằm trên <b>thanh menu</b> góc trên bên phải.</span><span lang="en">Done! The app's icon is in the <b>menu bar</b> at the top right.</span></li>
+          <li><span lang="vi">Mở <b>Piaz Switch</b> trong Applications. Xong! Biểu tượng app nằm trên <b>thanh menu</b> góc trên bên phải.</span><span lang="en">Open <b>Piaz Switch</b> from Applications. Done! Its icon is in the <b>menu bar</b> at the top right.</span></li>
         </ol>
-        <p class="install-alt">
-          <span lang="vi">Mac báo <i>“is damaged”</i>? Dán lệnh này vào <b>Terminal</b> rồi mở lại app:</span>
-          <span lang="en">Your Mac says <i>“is damaged”</i>? Paste this into <b>Terminal</b>, then open the app again:</span>
-        </p>
-        <div class="mac-cmd">
-          <code data-copy-source>xattr -dr com.apple.quarantine "/Applications/Piaz Switch.app"</code>
-          <button class="ghost-button mac-copy" type="button" data-copy><span lang="vi">Sao chép</span><span lang="en">Copy</span></button>
-        </div>
-        <p class="install-more"><a href="#mac-open" data-install-close><span lang="vi">Xem hướng dẫn đầy đủ cho Mac</span><span lang="en">Full guide for Mac</span></a></p>
       </div>
 
       <div class="install-foot">
