@@ -47,7 +47,7 @@
       // Name the download clicks so they are easy to count: one event per installer.
       document.addEventListener("click", function (e) {
         var a = e.target.closest && e.target.closest('a[href*="/releases/latest/download/"]');
-        if (a) posthog.capture("download_clicked", { file: a.href.split("/").pop(), lang: document.documentElement.lang });
+        if (a && !a.closest("#install-dialog")) posthog.capture("download_clicked", { file: a.href.split("/").pop(), lang: document.documentElement.lang });
       });
     </script>
   </head>
@@ -716,6 +716,68 @@
         </span>
       </div>
     </footer>
+
+    <!-- ========== install guide, shown when a download starts ========== -->
+    <dialog class="install-dialog" id="install-dialog" aria-labelledby="install-title">
+      <button class="install-close" type="button" data-install-close aria-label="Đóng / Close"><svg><use href="#i-plus" /></svg></button>
+      <div class="install-head">
+        <span class="install-badge"><svg><use href="#i-download" /></svg></span>
+        <div>
+          <h2 id="install-title"><span lang="vi">Đang tải Piaz Switch…</span><span lang="en">Downloading Piaz Switch…</span></h2>
+          <p>
+            <span lang="vi">Không thấy file tải về?</span><span lang="en">Download didn't start?</span>
+            <a href="#" data-install-retry><span lang="vi">Bấm để tải lại</span><span lang="en">Click to try again</span></a>
+          </p>
+        </div>
+      </div>
+
+      <div data-guide="win-setup">
+        <h3><span lang="vi">Cài đặt trên Windows</span><span lang="en">Install on Windows</span></h3>
+        <ol class="install-steps">
+          <li><span lang="vi">Mở file <b>PiazSwitch-windows-x64-setup.exe</b> vừa tải (trong danh sách tải của trình duyệt hoặc thư mục <b>Downloads</b>). Nếu Edge báo file <i>“isn't commonly downloaded”</i>: bấm <b>…</b> → <b>Keep</b>.</span><span lang="en">Open <b>PiazSwitch-windows-x64-setup.exe</b> from your browser's downloads or the <b>Downloads</b> folder. If Edge says it <i>“isn't commonly downloaded”</i>: click <b>…</b> → <b>Keep</b>.</span></li>
+          <li><span lang="vi">Nếu hiện <i>“Windows protected your PC”</i>: bấm <b>More info</b> → <b>Run anyway</b>. App chưa có chữ ký số, không phải virus.</span><span lang="en">If you see <i>“Windows protected your PC”</i>: click <b>More info</b> → <b>Run anyway</b>. The app just isn't code-signed yet.</span></li>
+          <li><span lang="vi">Cài xong, app nằm ở <b>khay hệ thống</b> góc phải dưới (có thể ẩn sau dấu <b>^</b>). Bấm vào để thêm tài khoản.</span><span lang="en">Once installed it lives in the <b>system tray</b> at the bottom right (maybe behind the <b>^</b>). Click it to add your accounts.</span></li>
+        </ol>
+      </div>
+
+      <div data-guide="win-portable">
+        <h3><span lang="vi">Dùng bản portable trên Windows</span><span lang="en">Use the portable build on Windows</span></h3>
+        <ol class="install-steps">
+          <li><span lang="vi">Chuột phải file <b>.zip</b> vừa tải → <b>Extract All</b> để giải nén ra một thư mục.</span><span lang="en">Right-click the <b>.zip</b> → <b>Extract All</b> into a folder.</span></li>
+          <li><span lang="vi">Mở <b>Piaz Switch.exe</b> (không phải <b>piaz-switch.exe</b>, đó là bản dòng lệnh). Nếu hiện <i>“Windows protected your PC”</i>: bấm <b>More info</b> → <b>Run anyway</b>.</span><span lang="en">Open <b>Piaz Switch.exe</b> (not <b>piaz-switch.exe</b>, the command line). If you see <i>“Windows protected your PC”</i>: click <b>More info</b> → <b>Run anyway</b>.</span></li>
+          <li><span lang="vi">App nằm ở <b>khay hệ thống</b> góc phải dưới. Bản portable không tự cập nhật, hãy tải lại khi có bản mới.</span><span lang="en">It lives in the <b>system tray</b> at the bottom right. The portable build doesn't update itself; download it again for new versions.</span></li>
+        </ol>
+      </div>
+
+      <div data-guide="mac">
+        <h3><span lang="vi">Cài đặt trên Mac</span><span lang="en">Install on a Mac</span></h3>
+        <ol class="install-steps">
+          <li><span lang="vi">Mở file <b>.dmg</b> vừa tải, kéo <b>Piaz Switch</b> vào <b>Applications</b>.</span><span lang="en">Open the <b>.dmg</b> and drag <b>Piaz Switch</b> into <b>Applications</b>.</span></li>
+          <li><span lang="vi">Mở app. Mac sẽ báo <i>“Apple could not verify…”</i>: bấm <b>Done</b> (macOS cũ: <b>Cancel</b>/<b>OK</b>).</span><span lang="en">Open the app. Your Mac says <i>“Apple could not verify…”</i>: click <b>Done</b> (older macOS: <b>Cancel</b>/<b>OK</b>).</span>
+            <span class="install-warn"><span lang="vi">⚠️ Đừng bấm <b>Move to Trash</b>.</span><span lang="en">⚠️ Don't click <b>Move to Trash</b>.</span></span>
+          </li>
+          <li><span lang="vi">Vào <b>System Settings → Privacy &amp; Security</b> (macOS 12 trở xuống: <b>System Preferences → Security &amp; Privacy</b>), kéo xuống, bấm <b>Open Anyway</b> rồi xác nhận bằng mật khẩu máy.</span><span lang="en">Go to <b>System Settings → Privacy &amp; Security</b> (macOS 12 and older: <b>System Preferences → Security &amp; Privacy</b>), scroll down, click <b>Open Anyway</b> and confirm with your password.</span></li>
+          <li><span lang="vi">Xong! Biểu tượng app nằm trên <b>thanh menu</b> góc trên bên phải.</span><span lang="en">Done! The app's icon is in the <b>menu bar</b> at the top right.</span></li>
+        </ol>
+        <p class="install-alt">
+          <span lang="vi">Mac báo <i>“is damaged”</i>? Dán lệnh này vào <b>Terminal</b> rồi mở lại app:</span>
+          <span lang="en">Your Mac says <i>“is damaged”</i>? Paste this into <b>Terminal</b>, then open the app again:</span>
+        </p>
+        <div class="mac-cmd">
+          <code data-copy-source>xattr -dr com.apple.quarantine "/Applications/Piaz Switch.app"</code>
+          <button class="ghost-button mac-copy" type="button" data-copy><span lang="vi">Sao chép</span><span lang="en">Copy</span></button>
+        </div>
+        <p class="install-more"><a href="#mac-open" data-install-close><span lang="vi">Xem hướng dẫn đầy đủ cho Mac</span><span lang="en">Full guide for Mac</span></a></p>
+      </div>
+
+      <div class="install-foot">
+        <p>
+          <span lang="vi">Cần có <b>Claude Code</b> và/hoặc <b>Codex CLI</b> đã đăng nhập một lần.</span>
+          <span lang="en">You need <b>Claude Code</b> and/or the <b>Codex CLI</b> signed in once.</span>
+        </p>
+        <button class="brand-button regular" type="button" data-install-close autofocus><span lang="vi">Đã hiểu</span><span lang="en">Got it</span></button>
+      </div>
+    </dialog>
 
     <script src="main.js" defer></script>
   </body>

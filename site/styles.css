@@ -1194,6 +1194,190 @@ main:focus {
   color: var(--quiet);
 }
 
+/* Install guide shown when a download starts. */
+.install-dialog {
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  padding: 28px;
+  border: 0;
+  border-radius: var(--radius-lg);
+  color: var(--ink-2);
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--line), var(--shadow-lg);
+  overflow-y: auto;
+}
+/* Browsers without <dialog> would show it inline at the end of the page. */
+.install-dialog:not([open]) {
+  display: none;
+}
+.install-dialog[open] {
+  animation: install-in 0.28s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+.install-dialog::backdrop {
+  background: rgb(15 23 42 / 0.45);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+@keyframes install-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+  }
+}
+.install-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: var(--quiet);
+  background: var(--bg);
+  cursor: pointer;
+}
+.install-close:hover {
+  color: var(--ink);
+  background: var(--line-soft);
+}
+.install-close svg {
+  width: 18px;
+  height: 18px;
+  transform: rotate(45deg);
+}
+.install-head {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  padding-right: 36px;
+}
+.install-badge {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  color: #fff;
+  background: linear-gradient(var(--accent-hi), var(--accent));
+  box-shadow: inset 0 1px #fff9, 0 8px 18px -8px rgb(52 102 226 / 0.8);
+}
+.install-badge svg {
+  width: 24px;
+  height: 24px;
+  animation: install-drop 1.4s ease-in-out infinite;
+}
+@keyframes install-drop {
+  50% {
+    transform: translateY(2px);
+  }
+}
+.install-head h2 {
+  margin: 0;
+  font-size: 22px;
+  color: var(--ink);
+}
+.install-head p {
+  margin: 2px 0 0;
+  font-size: 14px;
+  color: var(--quiet);
+}
+.install-dialog h3 {
+  margin: 22px 0 12px;
+  font-size: 16px;
+  color: var(--ink);
+}
+.install-steps {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: install;
+}
+.install-steps li {
+  position: relative;
+  padding: 12px 14px 12px 50px;
+  border-radius: 14px;
+  font-size: 14.5px;
+  line-height: 1.5;
+  background: var(--bg);
+  border: 1px solid var(--line-soft);
+  counter-increment: install;
+}
+.install-steps li::before {
+  content: counter(install);
+  position: absolute;
+  top: 11px;
+  left: 14px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(var(--accent-hi), var(--accent));
+}
+.install-warn {
+  display: block;
+  margin-top: 8px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  color: #9a3412;
+  background: #fff1e6;
+}
+.install-alt {
+  margin: 16px 0 8px;
+  font-size: 14px;
+}
+.install-dialog .mac-cmd code {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.install-more {
+  margin: 10px 0 0;
+  font-size: 14px;
+}
+.install-foot {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+.install-foot p {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--quiet);
+}
+.install-foot .brand-button {
+  flex: none;
+}
+@media (max-width: 520px) {
+  .install-dialog {
+    padding: 22px 18px;
+  }
+  .install-foot {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .install-dialog[open],
+  .install-badge svg {
+    animation: none;
+  }
+}
+
 /* ---------- author ---------- */
 .author-card {
   display: flex;

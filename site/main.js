@@ -273,6 +273,39 @@
     });
   }
 
+  // ---------- install guide when a download starts ----------
+  // The download goes ahead; the dialog only explains the next steps for the
+  // file that was picked.
+  var installDialog = document.getElementById("install-dialog");
+  function guideFor(href) {
+    if (/setup\.exe$/.test(href)) return "win-setup";
+    if (/portable\.zip$/.test(href)) return "win-portable";
+    if (/\.dmg$/.test(href)) return "mac";
+    return null;
+  }
+  if (installDialog && installDialog.showModal) {
+    document.addEventListener("click", function (event) {
+      var link = event.target.closest && event.target.closest('a[href*="/releases/latest/download/"]');
+      var guide = link && !installDialog.contains(link) && guideFor(link.href);
+      if (!guide) return;
+      installDialog.querySelectorAll("[data-guide]").forEach(function (block) {
+        block.hidden = block.getAttribute("data-guide") !== guide;
+      });
+      installDialog.querySelector("[data-install-retry]").href = link.href;
+      // After the click, so the download itself starts first.
+      setTimeout(function () {
+        if (!installDialog.open) installDialog.showModal();
+      }, 0);
+    });
+    installDialog.addEventListener("click", function (event) {
+      // A click on the backdrop lands on the dialog itself, and so does one on
+      // its padding: only a click outside its box closes it.
+      var box = installDialog.getBoundingClientRect();
+      var outside = event.target === installDialog && (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom);
+      if (outside || event.target.closest("[data-install-close]")) installDialog.close();
+    });
+  }
+
   // ---------- copy the macOS Terminal command ----------
   document.querySelectorAll("[data-copy]").forEach(function (button) {
     var source = button.parentNode.querySelector("[data-copy-source]");
