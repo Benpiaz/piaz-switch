@@ -445,7 +445,7 @@
           <h2 id="download-title"><span lang="vi">Chọn máy của bạn</span><span lang="en">Pick your computer</span></h2>
           <p class="lede">
             <span lang="vi">Miễn phí. Bản mới nhất</span><span lang="en">Free. Latest version</span>
-            <strong data-version-text>v0.3.0</strong>
+            <strong data-version-text>v0.4.0</strong>
             · <a href="https://github.com/Benpiaz/piaz-switch/releases" target="_blank" rel="noopener"><span lang="vi">tất cả phiên bản</span><span lang="en">all versions</span></a>
             · <a href="https://github.com/Benpiaz/piaz-switch/blob/main/CHANGELOG.md" target="_blank" rel="noopener"><span lang="vi">có gì mới</span><span lang="en">what's new</span></a>
           </p>
@@ -476,8 +476,8 @@
               <svg><use href="#i-download" /></svg><span lang="vi">Tải .dmg</span><span lang="en">Download .dmg</span>
             </a>
             <p class="dl-note">
-              <span lang="vi">Mở .dmg, kéo <b>Piaz Switch</b> vào <b>Applications</b>, lần đầu chuột phải vào app → <b>Open</b>.</span>
-              <span lang="en">Open the .dmg, drag <b>Piaz Switch</b> to <b>Applications</b>, then right-click it → <b>Open</b> the first time.</span>
+              <span lang="vi">Lần đầu mở, Mac sẽ chặn app. <a href="#mac-open">Xem 4 bước mở app trên Mac</a> và đừng bấm <b>Move to Trash</b>.</span>
+              <span lang="en">The first time, your Mac blocks the app. <a href="#mac-open">See the 4 steps to open it</a>, and don't click <b>Move to Trash</b>.</span>
             </p>
           </article>
 
@@ -489,10 +489,73 @@
               <svg><use href="#i-download" /></svg><span lang="vi">Tải .dmg</span><span lang="en">Download .dmg</span>
             </a>
             <p class="dl-note">
-              <span lang="vi">Không chắc máy mình chip gì? Menu Apple → <b>About This Mac</b>: ghi “Chip Apple M…” là Apple Silicon.</span>
-              <span lang="en">Not sure which chip? Apple menu → <b>About This Mac</b>: “Chip Apple M…” means Apple Silicon.</span>
+              <span lang="vi">Không chắc máy mình chip gì? Menu Apple → <b>About This Mac</b>: ghi “Chip Apple M…” là Apple Silicon. Mở lần đầu: <a href="#mac-open">xem hướng dẫn</a>.</span>
+              <span lang="en">Not sure which chip? Apple menu → <b>About This Mac</b>: “Chip Apple M…” means Apple Silicon. First launch: <a href="#mac-open">see how</a>.</span>
             </p>
           </article>
+        </div>
+
+        <div class="card mac-guide" id="mac-open">
+          <div class="mac-guide-head">
+            <span class="dl-os"><svg><use href="#i-apple" /></svg></span>
+            <div>
+              <h3><span lang="vi">Mở app trên Mac lần đầu</span><span lang="en">Opening the app on a Mac the first time</span></h3>
+              <p>
+                <span lang="vi">Piaz Switch miễn phí nên chưa đăng ký chứng nhận với Apple. Vì vậy lần đầu macOS báo <i>“Apple could not verify…”</i> và chặn app. App không hỏng, mã nguồn công khai trên GitHub. Làm theo 4 bước dưới đây, chỉ cần làm một lần.</span>
+                <span lang="en">Piaz Switch is free, so it isn't registered with Apple yet. The first time, macOS says <i>“Apple could not verify…”</i> and blocks it. The app isn't broken, and its source is public on GitHub. Do these 4 steps once.</span>
+              </p>
+            </div>
+          </div>
+
+          <ol class="mac-steps">
+            <li>
+              <span class="step-n">1</span>
+              <p>
+                <span lang="vi">Mở file <b>.dmg</b> vừa tải, kéo <b>Piaz Switch</b> vào thư mục <b>Applications</b>.</span>
+                <span lang="en">Open the <b>.dmg</b> you downloaded and drag <b>Piaz Switch</b> into <b>Applications</b>.</span>
+              </p>
+            </li>
+            <li>
+              <span class="step-n">2</span>
+              <p>
+                <span lang="vi">Mở <b>Piaz Switch</b> trong Applications. Khi Mac báo chặn, bấm <b>Done</b> (macOS cũ: <b>Cancel</b> hoặc <b>OK</b>).</span>
+                <span lang="en">Open <b>Piaz Switch</b> from Applications. When your Mac blocks it, click <b>Done</b> (older macOS: <b>Cancel</b> or <b>OK</b>).</span>
+              </p>
+              <p class="mac-warn">
+                <span lang="vi">⚠️ Đừng bấm <b>Move to Trash</b>, app sẽ bị chuyển vào Thùng rác.</span>
+                <span lang="en">⚠️ Don't click <b>Move to Trash</b>, or the app goes to the Trash.</span>
+              </p>
+            </li>
+            <li>
+              <span class="step-n">3</span>
+              <p>
+                <span lang="vi">Mở <b>System Settings → Privacy &amp; Security</b>, kéo xuống phần <b>Security</b>. Ở dòng <i>“Piaz Switch was blocked…”</i>, bấm <b>Open Anyway</b>. macOS 12 trở xuống: <b>System Preferences → Security &amp; Privacy → General</b>.</span>
+                <span lang="en">Open <b>System Settings → Privacy &amp; Security</b> and scroll down to <b>Security</b>. Next to <i>“Piaz Switch was blocked…”</i>, click <b>Open Anyway</b>. On macOS 12 and older: <b>System Preferences → Security &amp; Privacy → General</b>.</span>
+              </p>
+            </li>
+            <li>
+              <span class="step-n">4</span>
+              <p>
+                <span lang="vi">Ở hộp thoại cuối bấm <b>Open Anyway</b> (hoặc <b>Open</b>), nhập mật khẩu máy nếu được hỏi. Xong! Từ giờ app mở bình thường, biểu tượng nằm trên <b>thanh menu</b> ở góc trên bên phải màn hình.</span>
+                <span lang="en">In the last dialog click <b>Open Anyway</b> (or <b>Open</b>) and enter your Mac's password if asked. Done! From now on it opens normally, and its icon sits in the <b>menu bar</b> at the top right of the screen.</span>
+              </p>
+            </li>
+          </ol>
+
+          <div class="mac-alt">
+            <p>
+              <span lang="vi"><b>Mac báo “is damaged”, hoặc không thấy nút Open Anyway?</b> Mở app <b>Terminal</b> (bấm ⌘ Space, gõ “Terminal”), dán lệnh này rồi nhấn Enter, sau đó mở lại app:</span>
+              <span lang="en"><b>Your Mac says “is damaged”, or there's no Open Anyway button?</b> Open the <b>Terminal</b> app (press ⌘ Space, type “Terminal”), paste this command, press Enter, then open the app again:</span>
+            </p>
+            <div class="mac-cmd">
+              <code data-copy-source>xattr -dr com.apple.quarantine "/Applications/Piaz Switch.app"</code>
+              <button class="ghost-button mac-copy" type="button" data-copy><span lang="vi">Sao chép</span><span lang="en">Copy</span></button>
+            </div>
+            <p>
+              <span lang="vi"><b>Lỡ bấm Move to Trash?</b> Mở <b>Thùng rác</b>, chuột phải vào Piaz Switch → <b>Put Back</b> (hoặc tải lại file .dmg), rồi làm lại từ bước 2.</span>
+              <span lang="en"><b>Clicked Move to Trash?</b> Open the <b>Trash</b>, right-click Piaz Switch → <b>Put Back</b> (or download the .dmg again), then start again at step 2.</span>
+            </p>
+          </div>
         </div>
 
         <p class="dl-foot">
@@ -545,8 +608,8 @@
           <details>
             <summary><span lang="vi">Sao Windows / macOS cảnh báo khi mở?</span><span lang="en">Why does Windows / macOS warn me?</span></summary>
             <p>
-              <span lang="vi">App chưa có chứng chỉ ký số (khá đắt), nên hệ thống cảnh báo một lần. Windows: <b>More info → Run anyway</b>. macOS: chuột phải → <b>Open</b>, hoặc cho phép trong <b>System Settings → Privacy &amp; Security</b>.</span>
-              <span lang="en">The app isn't code-signed yet, so the system warns once. Windows: <b>More info → Run anyway</b>. macOS: right-click → <b>Open</b>, or allow it in <b>System Settings → Privacy &amp; Security</b>.</span>
+              <span lang="vi">App chưa có chứng chỉ ký số (khá đắt), nên hệ thống cảnh báo một lần. Windows: <b>More info → Run anyway</b>. macOS: bấm <b>Done</b> (đừng bấm Move to Trash), rồi vào <b>System Settings → Privacy &amp; Security</b> → <b>Open Anyway</b>. <a href="#mac-open">Hướng dẫn chi tiết cho Mac</a>.</span>
+              <span lang="en">The app isn't code-signed yet, so the system warns once. Windows: <b>More info → Run anyway</b>. macOS: click <b>Done</b> (not Move to Trash), then <b>System Settings → Privacy &amp; Security</b> → <b>Open Anyway</b>. <a href="#mac-open">Step-by-step for Mac</a>.</span>
             </p>
           </details>
           <details>

@@ -79,9 +79,20 @@ All versions: [Releases](https://github.com/Benpiaz/piaz-switch/releases).
 
 - **Windows** — "Windows protected your PC": click **More info → Run anyway**.
   The app needs WebView2, which Windows 11 (and up-to-date Windows 10) already has.
-- **macOS** — open the `.dmg`, drag **Piaz Switch** to **Applications**, then
-  right-click it and choose **Open** (or allow it in **System Settings → Privacy &
-  Security**).
+- **macOS** — the app isn't notarized by Apple, so macOS blocks it the first time
+  ("Apple could not verify…"):
+  1. Open the `.dmg` and drag **Piaz Switch** to **Applications**.
+  2. Open the app. When macOS blocks it, click **Done** (older macOS: **Cancel** or
+     **OK**). Don't click **Move to Trash**.
+  3. Go to **System Settings → Privacy & Security**, scroll to **Security** and
+     click **Open Anyway** next to "Piaz Switch was blocked…" (macOS 12 and older:
+     **System Preferences → Security & Privacy → General**).
+  4. Click **Open Anyway** (or **Open**) and enter your password if asked. From
+     then on it opens normally.
+
+  If macOS says the app "is damaged", or there is no **Open Anyway** button, run
+  this in Terminal and open the app again:
+  `xattr -dr com.apple.quarantine "/Applications/Piaz Switch.app"`
 
 The app then lives in the system tray (Windows: maybe behind the `^` by the clock —
 drag it onto the taskbar) or the menu bar (macOS).
@@ -285,8 +296,21 @@ tài khoản còn bao nhiêu hạn mức (5 giờ, tuần, theo model).
 - **Windows**: tải `PiazSwitch-windows-x64-setup.exe` và chạy để cài. Nếu Windows
   hiện "Windows protected your PC", bấm **More info → Run anyway** (app chưa có chữ
   ký số, không phải virus).
-- **macOS**: tải file `.dmg` đúng loại máy (Apple Silicon M1–M4 hoặc Intel), kéo
-  **Piaz Switch** vào **Applications**, rồi chuột phải vào app → **Open** ở lần mở đầu.
+- **macOS**: tải file `.dmg` đúng loại máy (Apple Silicon M1–M4 hoặc Intel). App
+  chưa đăng ký chứng nhận với Apple nên lần đầu macOS sẽ chặn ("Apple could not
+  verify…"):
+  1. Mở file `.dmg`, kéo **Piaz Switch** vào **Applications**.
+  2. Mở app. Khi Mac báo chặn, bấm **Done** (macOS cũ: **Cancel** hoặc **OK**). Đừng
+     bấm **Move to Trash**.
+  3. Vào **System Settings → Privacy & Security**, kéo xuống phần **Security**, bấm
+     **Open Anyway** ở dòng "Piaz Switch was blocked…" (macOS 12 trở xuống:
+     **System Preferences → Security & Privacy → General**).
+  4. Bấm **Open Anyway** (hoặc **Open**), nhập mật khẩu máy nếu được hỏi. Từ giờ app
+     mở bình thường.
+
+  Nếu Mac báo app "is damaged", hoặc không có nút **Open Anyway**, mở Terminal chạy
+  lệnh này rồi mở lại app:
+  `xattr -dr com.apple.quarantine "/Applications/Piaz Switch.app"`
 
 Sau khi mở, app nằm ở khay hệ thống (Windows, góc phải dưới, có thể ẩn sau dấu `^`)
 hoặc thanh menu (macOS). Bấm vào biểu tượng để đổi tài khoản, chọn **Open** để mở

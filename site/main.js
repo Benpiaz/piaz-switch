@@ -273,6 +273,31 @@
     });
   }
 
+  // ---------- copy the macOS Terminal command ----------
+  document.querySelectorAll("[data-copy]").forEach(function (button) {
+    var source = button.parentNode.querySelector("[data-copy-source]");
+    button.addEventListener("click", function () {
+      if (!source) return;
+      // Without clipboard access, select the command so ⌘C copies it.
+      function selectIt() {
+        var range = document.createRange();
+        range.selectNodeContents(source);
+        var selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+      if (!navigator.clipboard) return selectIt();
+      navigator.clipboard.writeText(source.textContent).then(function () {
+        button.classList.add("done");
+        button.textContent = lang() === "vi" ? "Đã chép ✓" : "Copied ✓";
+        setTimeout(function () {
+          button.classList.remove("done");
+          button.innerHTML = '<span lang="vi">Sao chép</span><span lang="en">Copy</span>';
+        }, 1800);
+      }, selectIt);
+    });
+  });
+
   if (window.fetch) {
     getJson("https://api.github.com/repos/" + REPO)
       .then(function (repo) {

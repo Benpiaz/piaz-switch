@@ -1092,6 +1092,100 @@ main:focus {
   color: var(--accent-ink);
   background: var(--accent-soft);
 }
+/* First launch on a Mac: Gatekeeper blocks an app not notarized by Apple. */
+.mac-guide {
+  margin-top: 18px;
+  padding: 32px;
+  scroll-margin-top: 110px;
+}
+.mac-guide-head {
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+}
+.mac-guide-head .dl-os {
+  flex: none;
+}
+.mac-guide-head h3 {
+  margin: 4px 0 6px;
+  font-size: 22px;
+}
+.mac-guide-head p {
+  margin: 0;
+  max-width: 760px;
+}
+.mac-steps {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin: 26px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.mac-steps li {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px;
+  border-radius: var(--radius);
+  background: var(--bg);
+  border: 1px solid var(--line-soft);
+}
+.mac-steps .step-n {
+  width: 34px;
+  height: 34px;
+  font-size: 15px;
+}
+.mac-steps p {
+  margin: 0;
+  font-size: 14.5px;
+}
+.mac-steps .mac-warn {
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  color: #9a3412;
+  background: #fff1e6;
+}
+.mac-alt {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  margin-top: 22px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+.mac-alt p {
+  margin: 0;
+  font-size: 14.5px;
+}
+.mac-cmd {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 10px 10px 16px;
+  border-radius: 12px;
+  background: #0f172a;
+}
+.mac-cmd code {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  overflow-x: auto;
+  white-space: nowrap;
+  color: #e2e8f0;
+  background: none;
+  user-select: all;
+}
+.mac-copy {
+  flex: none;
+  padding: 6px 14px;
+  font-size: 13px;
+}
+.mac-copy.done {
+  color: #15803d;
+}
+
 .dl-foot {
   max-width: 760px;
   margin: 26px auto 0;
@@ -1368,6 +1462,12 @@ main:focus {
   .dl-grid {
     grid-template-columns: 1fr;
   }
+  .mac-steps {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .mac-guide {
+    padding: 24px;
+  }
   .oss-card {
     flex-wrap: wrap;
   }
@@ -1387,6 +1487,16 @@ main:focus {
   }
 }
 @media (max-width: 680px) {
+  .mac-steps {
+    grid-template-columns: 1fr;
+  }
+  .mac-guide-head .dl-os {
+    display: none;
+  }
+  .mac-cmd code {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
   .hide-sm,
   .nav-actions .brand-button {
     display: none;

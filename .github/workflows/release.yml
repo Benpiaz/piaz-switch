@@ -141,7 +141,7 @@ jobs:
           | macOS 11+, Apple Silicon | `PiazSwitch-macos-arm64.dmg` |
           | macOS 11+, Intel | `PiazSwitch-macos-x64.dmg` |
 
-          The app is not code-signed yet. Windows: **More info → Run anyway**. macOS: right-click the app → **Open** the first time.
+          The app is not code-signed yet. Windows: **More info → Run anyway**. macOS: open the app, click **Done** (not Move to Trash), then **System Settings → Privacy & Security → Open Anyway**. If it says the app "is damaged" or there is no Open Anyway button, run `xattr -dr com.apple.quarantine "/Applications/Piaz Switch.app"` in Terminal. Step by step: https://piaz-switch.vercel.app/#mac-open
           Each download has a `.sha256` checksum next to it. The `.sig` files and `latest.json` are for the app's own updater.
           EOF
           cat notes.md
