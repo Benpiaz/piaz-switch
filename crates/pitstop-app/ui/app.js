@@ -707,8 +707,12 @@ function notesOf(tool, account) {
   if (usage && usage.status === "unauthorized") chips.push(h("span", { class: "chip warn" }, icon("warning"), h("span", { text: t("unauthorized") })));
   if (usage && usage.status === "failed") {
     // The usage service turning reads away for a while is not a fault: say so plainly.
-    const text = usage.rateLimited ? t("usageRateLimited") : t("usageFailed", { message: usage.message });
-    chips.push(h("span", { class: "chip warn" }, icon("warning"), h("span", { text })));
+    const text = usage.rateLimited
+      ? t("usageRateLimited")
+      : usage.offline
+        ? t("usageOffline")
+        : t("usageFailed", { message: usage.message });
+    chips.push(h("span", { class: "chip warn", title: usage.message }, icon("warning"), h("span", { text })));
   }
   if (usage && usage.status === "ok" && !usage.windows.length) chips.push(h("span", { class: "chip" }, h("span", { text: t("noLimits") })));
   if (warm) {

@@ -45,6 +45,16 @@ pub enum UsageReport {
 /// What a read the service turned away for coming too often came to.
 pub const RATE_LIMITED: &str = "rate limited, try again later";
 
+/// How a read that never got an answer (offline, a stalled connection)
+/// starts.
+pub const NETWORK: &str = "network: ";
+
+/// How long one try at a read may take. Slow links take seconds just to
+/// shake hands, so this is generous.
+const READ_TIMEOUT: Duration = Duration::from_secs(30);
+/// The pause before the one retry of a read that got no answer.
+const RETRY_AFTER: Duration = Duration::from_secs(2);
+
 #[derive(Debug)]
 pub enum FetchError {
     Unauthorized,
@@ -67,7 +77,7 @@ pub struct Http {
 impl Http {
     pub fn new() -> Self {
         let agent = ureq::Agent::config_builder()
-            .timeout_global(Some(Duration::from_secs(10)))
+            .timeout_global(Some(READ_TIMEOUT))
             .http_status_as_error(false)
             .build()
             .into();
@@ -87,13 +97,13 @@ fn answer(
     response: Result<ureq::http::Response<ureq::Body>, ureq::Error>,
     service: &str,
 ) -> Result<Value, FetchError> {
-    let mut response = response.map_err(|e| FetchError::Other(format!("network: {e}")))?;
+    let mut response = response.map_err(|e| FetchError::Other(format!("{NETWORK}{e}")))?;
     match response.status().as_u16() {
         200 => {
             let body = response
                 .body_mut()
                 .read_to_string()
-                .map_err(|e| FetchError::Other(format!("network: {e}")))?;
+                .map_err(|e| FetchError::Other(format!("{NETWORK}{e}")))?;
             serde_json::from_str(&body)
                 .map_err(|e| FetchError::Other(format!("unreadable answer: {e}")))
         }
@@ -103,26 +113,39 @@ fn answer(
     }
 }
 
+/// A request that got no answer at all is tried once more: on a flaky link
+/// the next try usually goes through. One that got an answer never is.
+fn call_twice(
+    call: impl Fn() -> Result<ureq::http::Response<ureq::Body>, ureq::Error>,
+) -> Result<ureq::http::Response<ureq::Body>, ureq::Error> {
+    call().or_else(|_| {
+        std::thread::sleep(RETRY_AFTER);
+        call()
+    })
+}
+
 impl UsageApi for Http {
     fn claude(&self, access_token: &str) -> Result<Value, FetchError> {
-        let response = self
-            .agent
-            .get(USAGE_URL)
-            .header("Authorization", format!("Bearer {access_token}"))
-            .header("anthropic-beta", "oauth-2025-04-20")
-            .call();
+        let response = call_twice(|| {
+            self.agent
+                .get(USAGE_URL)
+                .header("Authorization", format!("Bearer {access_token}"))
+                .header("anthropic-beta", "oauth-2025-04-20")
+                .call()
+        });
         answer(response, "Anthropic")
     }
 
     /// A standalone GET: no model request, no quota
     /// spent. `ChatGPT-Account-ID` is required.
     fn codex(&self, access_token: &str, account_id: &str) -> Result<Value, FetchError> {
-        let response = self
-            .agent
-            .get(CODEX_USAGE_URL)
-            .header("Authorization", format!("Bearer {access_token}"))
-            .header("ChatGPT-Account-ID", account_id)
-            .call();
+        let response = call_twice(|| {
+            self.agent
+                .get(CODEX_USAGE_URL)
+                .header("Authorization", format!("Bearer {access_token}"))
+                .header("ChatGPT-Account-ID", account_id)
+                .call()
+        });
         answer(response, "OpenAI")
     }
 }

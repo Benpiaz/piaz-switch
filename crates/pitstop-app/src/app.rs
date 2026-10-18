@@ -540,7 +540,7 @@ fn warm_ups(
 /// Seconds until the next usage read, judged from the resets the last
 /// reading knows of (they stay where they are whatever the new one says).
 fn next_read_wait(app: &AppHandle) -> u64 {
-    use pitstop_core::usage::UsageReport;
+    use pitstop_core::usage::{UsageReport, NETWORK};
     let state = app.state::<AppState>();
     let (resets, offline): (Vec<i64>, bool) =
         state
@@ -562,7 +562,7 @@ fn next_read_wait(app: &AppHandle) -> u64 {
                 // when the app starts at login before Wi-Fi is up.
                 let offline = !inner.usage.iter().any(|u| matches!(u.report, UsageReport::Ok(_)))
                 && inner.usage.iter().any(
-                    |u| matches!(&u.report, UsageReport::Failed(why) if why.starts_with("network")),
+                    |u| matches!(&u.report, UsageReport::Failed(why) if why.starts_with(NETWORK)),
                 );
                 (resets, offline)
             })

@@ -177,8 +177,28 @@ pub fn verdict(exit: Option<i32>, stdout: &str) -> Result<(), Failure> {
         (Some(429), Some("usage_limit_reached")) => Err(Failure::LimitReached),
         (Some(401 | 403), _) => Err(Failure::LoginRefused),
         (Some(429 | 500..=599), _) => Err(Failure::Unreachable),
+        (None, _) if never_answered(&said) => Err(Failure::Unreachable),
         _ => Err(Failure::Failed(said)),
     }
+}
+
+/// Whether print mode's words say no answer came back at all: no connection,
+/// or one that timed out.
+fn never_answered(said: &str) -> bool {
+    let said = said.to_lowercase();
+    [
+        "connection error",
+        "timed out",
+        "timeout",
+        "econnreset",
+        "econnrefused",
+        "enotfound",
+        "etimedout",
+        "fetch failed",
+        "network",
+    ]
+    .iter()
+    .any(|sign| said.contains(sign))
 }
 
 /// A fresh directory only this user can read, removed when dropped with
@@ -264,7 +284,9 @@ fn run_in(
         .recv_timeout(Duration::from_secs(5))
         .unwrap_or_default();
     match status {
-        None => Err(Failure::Failed("Claude Code took too long".into())),
+        // Print mode waits out a dead link retrying, so a run this long is
+        // one that never reached the service.
+        None => Err(Failure::Unreachable),
         Some(status) => verdict(status.code(), &said),
     }
 }
@@ -311,11 +333,14 @@ fn new_day(warmed: &mut Warmed, today: &str) {
         warmed.failures = 0;
         warmed.last_failure = None;
         warmed.last_error = None;
+        warmed.unreachable = 0;
     }
 }
 
 /// Write down a warm-up of `name` at `now`: one that worked marks the start
-/// of its period, one that failed counts against today's tries.
+/// of its period, one that failed counts against today's tries, unless the
+/// service was out of reach or overloaded: a night offline must not use the
+/// day up. Those count in a row instead, and each waits longer.
 pub fn record(
     ledger: &mut Ledger,
     name: &str,
@@ -329,9 +354,15 @@ pub fn record(
         Ok(()) => {
             warmed.started = Some(now);
             warmed.last_error = None;
+            warmed.unreachable = 0;
         }
         Err(failure) => {
-            warmed.failures += 1;
+            if *failure == Failure::Unreachable {
+                warmed.unreachable += 1;
+            } else {
+                warmed.failures += 1;
+                warmed.unreachable = 0;
+            }
             warmed.last_failure = Some(now);
             warmed.last_error = Some(failure.code().to_owned());
         }
@@ -500,6 +531,16 @@ mod tests {
             ),
             (
                 Some(1),
+                r#"{"is_error":true,"result":"API Error: Connection error."}"#,
+                Err(Failure::Unreachable),
+            ),
+            (
+                Some(1),
+                r#"{"is_error":true,"result":"API Error: Request timed out."}"#,
+                Err(Failure::Unreachable),
+            ),
+            (
+                Some(1),
                 r#"{"is_error":false,"result":"OK"}"#,
                 Err(Failure::Failed("OK".into())),
             ),
@@ -558,14 +599,14 @@ mod tests {
             "ben2",
             "2026-10-15",
             100,
-            Err(&Failure::Unreachable),
+            Err(&Failure::LoginRefused),
         );
         record(
             &mut ledger,
             "ben2",
             "2026-10-15",
             200,
-            Err(&Failure::Unreachable),
+            Err(&Failure::Failed("x".into())),
         );
         assert_eq!(ledger["ben2"].failures, 2);
         assert_eq!(ledger["ben2"].last_failure, Some(200));
@@ -573,6 +614,24 @@ mod tests {
         assert_eq!(ledger["ben2"].failures, 0);
         assert_eq!(ledger["ben2"].last_failure, None);
         assert_eq!(ledger["ben2"].started, Some(300));
+    }
+
+    #[test]
+    fn a_warm_up_that_never_reached_the_service_waits_but_uses_no_try() {
+        let mut ledger = Ledger::new();
+        for at in [100, 200, 300, 400] {
+            record(
+                &mut ledger,
+                "ben1",
+                "2026-10-18",
+                at,
+                Err(&Failure::Unreachable),
+            );
+        }
+        assert_eq!(ledger["ben1"].failures, 0);
+        assert_eq!(ledger["ben1"].unreachable, 4);
+        assert_eq!(ledger["ben1"].last_failure, Some(400));
+        assert_eq!(ledger["ben1"].last_error.as_deref(), Some("unreachable"));
     }
 
     #[test]
@@ -615,7 +674,7 @@ mod tests {
             "a",
             "2026-10-15",
             50,
-            Err(&Failure::Unreachable),
+            Err(&Failure::LoginRefused),
             || true,
         );
         assert_eq!(a.failures, 1);

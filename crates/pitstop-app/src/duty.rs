@@ -161,6 +161,16 @@ const START_STEP: i64 = 600;
 pub const WARM_TRIES: u32 = 3;
 /// How long after a failed warm-up the next one waits.
 pub const WARM_RETRY_AFTER: i64 = 10 * 60;
+/// The longest wait between warm-ups that keep failing to reach the service.
+pub const WARM_RETRY_MOST: i64 = 60 * 60;
+
+/// How long after its last failure `warmed` waits: each failure in a row to
+/// reach the service doubles the wait, up to an hour, so a day offline
+/// doesn't keep a parked login lent out every ten minutes.
+pub fn warm_retry_after(warmed: &Warmed) -> i64 {
+    let doublings = warmed.unreachable.saturating_sub(1).min(4);
+    (WARM_RETRY_AFTER << doublings).min(WARM_RETRY_MOST)
+}
 /// Automatic switches tried for one limit of one account before its reset.
 pub const SWITCH_TRIES: u32 = 3;
 /// How often usage is read when no reset is near.
@@ -230,6 +240,8 @@ pub struct Warmed {
     pub started: Option<i64>,
     /// What the last failed warm-up came to (`loginRefused`…), until one works.
     pub last_error: Option<String>,
+    /// Failures in a row to reach the service; they use none of `failures`.
+    pub unreachable: u32,
 }
 
 /// Where an account stands as far as warming it up goes.
@@ -323,7 +335,7 @@ pub fn warm_standing(
     }
     if let Some(until) = warmed
         .last_failure
-        .map(|at| at + WARM_RETRY_AFTER)
+        .map(|at| at + warm_retry_after(warmed))
         .filter(|&until| until > now)
     {
         return WarmStanding::Waiting {
@@ -736,6 +748,7 @@ mod tests {
                 Some(UsageView::Failed {
                     message: "x".into(),
                     rate_limited: false,
+                    offline: false,
                 }),
                 fresh.clone(),
                 false,
@@ -792,6 +805,25 @@ mod tests {
             ..Warmed::default()
         };
         assert_eq!(standing(usage, spent, false, true), WarmStanding::GaveUp);
+    }
+
+    #[test]
+    fn failing_to_reach_the_service_waits_longer_each_time_and_never_gives_up() {
+        let usage = ok(vec![window("5h", 0.0, None)]);
+        let offline = |unreachable| Warmed {
+            unreachable,
+            last_failure: Some(NOW),
+            last_error: Some("unreachable".into()),
+            ..Warmed::default()
+        };
+        let waits: Vec<i64> = [1, 2, 3, 4, 5, 40]
+            .into_iter()
+            .map(|n| match standing(usage.clone(), offline(n), false, true) {
+                WarmStanding::Waiting { until, .. } => (until - NOW) / 60,
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(waits, [10, 20, 40, 60, 60, 60]);
     }
 
     // ---- automatic switch

@@ -125,6 +125,8 @@ pub enum UsageView {
         /// The service turned the read away for coming too often.
         #[serde(rename = "rateLimited")]
         rate_limited: bool,
+        /// No answer came back: offline, or a link too slow to finish the read.
+        offline: bool,
     },
 }
 
@@ -353,6 +355,7 @@ impl From<&UsageReport> for UsageView {
             UsageReport::Failed(message) => UsageView::Failed {
                 message: message.clone(),
                 rate_limited: message == pitstop_core::usage::RATE_LIMITED,
+                offline: message.starts_with(pitstop_core::usage::NETWORK),
             },
         }
     }
@@ -579,7 +582,10 @@ mod tests {
         let turned_away = view(pitstop_core::usage::RATE_LIMITED);
         assert_eq!(turned_away["status"], "failed");
         assert_eq!(turned_away["rateLimited"], true);
-        assert_eq!(view("network: offline")["rateLimited"], false);
+        assert_eq!(turned_away["offline"], false);
+        let unanswered = view("network: timeout: global");
+        assert_eq!(unanswered["rateLimited"], false);
+        assert_eq!(unanswered["offline"], true);
     }
 
     const TOKEN_A: &str = "SECRET-TOKEN-AAA";
