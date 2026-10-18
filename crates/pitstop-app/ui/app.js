@@ -491,11 +491,6 @@ function renderAccounts(moves) {
   for (const tool of snap.tools) {
     if (tool.live.state === "unmanaged") callouts.push(nameTip(tool));
   }
-  for (const tool of snap.tools) {
-    if (tool.accounts.length === 1 && tool.accounts[0].inUse && !snap.dismissedTips.includes(tool.id)) {
-      callouts.push(secondTip(tool));
-    }
-  }
   const keys = new Set(callouts.map((el) => el.dataset.callout));
   for (const el of callouts) {
     if (!shownCallouts.has(el.dataset.callout)) el.classList.add("enter");
@@ -518,7 +513,12 @@ function renderAccounts(moves) {
       h(
         "section",
         { class: "group", "aria-label": tool.name },
-        h("h2", { class: "group-head" }, h("span", { text: tool.name }), h("span", { class: "count", "aria-hidden": "true", text: String(tool.accounts.length) })),
+        h(
+          "div",
+          { class: "group-head" },
+          h("h2", { class: "group-title" }, h("span", { text: tool.name }), h("span", { class: "count", "aria-hidden": "true", text: String(tool.accounts.length) })),
+          groupAdd(tool),
+        ),
         h(
           "div",
           { class: "panel" },
@@ -528,6 +528,14 @@ function renderAccounts(moves) {
     );
   }
   return list;
+}
+
+/** Adding an account where it will show, with its tool already chosen. */
+function groupAdd(tool) {
+  if (tool.installed === false) return null;
+  const label = t("addAccountTo", { tool: tool.name });
+  const add = h("button", { class: "button compact ghost group-add", title: label, "aria-label": label, onclick: () => openAdd(tool.id) }, icon("plus"), t("add"));
+  return keyed(add, `add:${tool.id}`);
 }
 
 function accountRow(tool, account, moves) {
@@ -807,20 +815,6 @@ function nameTip(tool) {
   });
 }
 
-function secondTip(tool) {
-  return noticeRow({
-    key: `tip-second:${tool.id}`,
-    kind: "tip",
-    icon: "plus",
-    title: t("tipSecondTitle"),
-    lines: [t("tipSecondDetail", { tool: tool.name })],
-    actions: [
-      { title: t("addAccount"), run: () => openAdd(tool.id) },
-      { title: t("notNow"), kind: "ghost", run: () => invoke("dismiss_tip", { provider: tool.id }) },
-    ],
-  });
-}
-
 // ---------- rows: selection, keys, menu ----------
 
 function select(key) {
@@ -1035,6 +1029,7 @@ function renderDialog() {
   const focusKey = inside ? focusKeyOf(active) : null;
   const caret = focusedField && typeof active.selectionStart === "number" ? [active.selectionStart, active.selectionEnd] : null;
   const before = sheetModel === dialog ? segmentedIndex(sheetEl) : null;
+  const fresh = sheetModel !== dialog;
 
   // A new sheet animates in by itself (CSS animations start when an element
   // enters the page), whether the backdrop is new or already up.
@@ -1062,6 +1057,8 @@ function renderDialog() {
         sheetEl;
   target.focus({ preventScroll: true });
   if (again && caret && again.dataset.field === focusedField) again.setSelectionRange(caret[0], caret[1]);
+  // A suggested name is taken with Return or replaced by typing.
+  else if (fresh && target.dataset && target.dataset.field === "name") target.select();
   slideSegmented(sheetEl, before);
 }
 
@@ -1296,6 +1293,9 @@ const DIALOGS = {
     const missing = offered.filter((x) => x.installed === false && !x.accounts.length);
     const chosenMissing = missing.some((x) => x.id === d.provider);
     const nameOk = d.again || NAME_RULE.test(d.name.trim());
+    const nameBroken = d.name.trim() !== "" && !nameOk;
+    // With one tool to add to there is nothing to choose: the title names it.
+    const choice = offered.filter((x) => !missing.includes(x)).length > 1;
     d.submit = () => !chosenMissing && startSignIn();
     // A click moves on to the name, as typing it is what comes next; arrow
     // keys stay on the choice.
@@ -1303,30 +1303,38 @@ const DIALOGS = {
       if (d.provider !== id) {
         d.provider = id;
         d.error = null;
+        // A name still as suggested follows the tool; a typed one stays.
+        if (d.name === d.suggested) d.name = d.suggested = nextName(toolOf(id));
         renderDialog();
       }
       const next = byKey ? sheetEl.querySelector(`[data-focus="seg-${CSS.escape(id)}"]`) : sheetEl.querySelector('[data-field="name"]');
       if (next) next.focus({ preventScroll: true });
+      if (next && !byKey && d.name === d.suggested) next.select();
     };
     return [
-      sheetHead(d.again ? t("signInAgainTitle", { name: d.name }) : t("addTitle"), d.again ? t("signInAgainMessage", { email: d.email || d.name }) : t("addMessage")),
+      sheetHead(
+        d.again ? t("signInAgainTitle", { name: d.name }) : choice ? t("addTitle") : t("addTitleFor", { tool: toolName }),
+        d.again ? t("signInAgainMessage", { email: d.email || d.name }) : t("addMessage"),
+      ),
       h(
         "div",
         { class: "form" },
         d.again
           ? null
           : [
-              field(
-                t("tool"),
-                segmented(
-                  offered.map((x) => ({ id: x.id, label: x.name, disabled: missing.includes(x) })),
-                  d.provider,
-                  "tool-label",
-                  choose,
-                ),
-              ),
+              choice
+                ? field(
+                    t("tool"),
+                    segmented(
+                      offered.map((x) => ({ id: x.id, label: x.name, disabled: missing.includes(x) })),
+                      d.provider,
+                      "tool-label",
+                      choose,
+                    ),
+                  )
+                : null,
               field(t("name"), nameInput(d, t("namePrompt"))),
-              nameHint(d),
+              nameBroken ? nameHint(d) : null,
             ],
         missing.map((x) => h("p", { class: "footnote", text: t("toolMissing", { tool: x.name, program: x.id === "codex" ? "codex" : "claude" }) })),
         d.again ? null : h("p", { class: "footnote", text: t("addWarning") }),
@@ -1467,7 +1475,23 @@ function openAdd(provider) {
   const tools = snap ? snap.tools : [];
   const usable = tools.filter((x) => x.installed !== false || x.accounts.length);
   const chosen = provider || (usable[0] && usable[0].id) || "claude-code";
-  openDialog({ type: "signin", again: false, provider: chosen, name: "", phase: "form", error: null });
+  const name = nextName(toolOf(chosen));
+  openDialog({ type: "signin", again: false, provider: chosen, name, suggested: name, phase: "form", error: null });
+}
+
+/** The name an added account most likely takes: the next of a numbered
+ * series (ben1, ben2 → ben3), else none. */
+function nextName(tool) {
+  const names = tool ? tool.accounts.map((a) => a.name) : [];
+  const taken = new Set(names.map((n) => n.toLowerCase()));
+  // The series of the last account in the list, numbered on from its highest.
+  const last = [...names].reverse().map((name) => /^(.*?)(\d+)$/.exec(name)).find(Boolean);
+  if (!last) return "";
+  const prefix = last[1];
+  let n = Math.max(...names.map((name) => /^(.*?)(\d+)$/.exec(name)).filter((m) => m && m[1] === prefix).map((m) => Number(m[2]))) + 1;
+  while (taken.has(`${prefix}${n}`.toLowerCase())) n++;
+  const name = `${prefix}${n}`;
+  return NAME_RULE.test(name) ? name : "";
 }
 
 function openSignInAgain(tool, account) {

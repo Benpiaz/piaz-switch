@@ -643,6 +643,20 @@
     font-variant-numeric: tabular-nums;
   }
 
+  .group-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font: inherit;
+  }
+
+  /* At the head's far end, its text lined up with the panel's edge; the
+     button's height doesn't push the panel down. */
+  .group-head .group-add {
+    margin: -5px -10px -5px auto;
+    font-weight: var(--w-medium);
+  }
+
   .panel {
     @apply relative overflow-hidden rounded-panel bg-card shadow-panel;
   }
