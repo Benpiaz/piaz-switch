@@ -138,6 +138,9 @@ pub struct WindowView {
     pub percent: f64,
     pub resets_at: Option<i64>,
     pub length_secs: Option<i64>,
+    /// A per-model limit nobody has used: the window counts it in totals
+    /// over accounts, not in an account's own list.
+    pub quiet: bool,
 }
 
 /// The account in use ran out of a limit and another has room.
@@ -356,6 +359,7 @@ impl From<&UsageReport> for UsageView {
                         percent: w.percent,
                         resets_at: w.resets_at,
                         length_secs: w.length_secs,
+                        quiet: w.quiet,
                     })
                     .collect(),
             },
@@ -558,6 +562,7 @@ pub fn tray_title(snapshot: &Snapshot) -> Option<String> {
         .iter()
         .find_map(|t| t.accounts.iter().find(|a| a.in_use))?;
     let fullest = windows_of(account).and_then(|windows| {
+        let windows: Vec<&WindowView> = windows.iter().filter(|w| !w.quiet).collect();
         let general: Vec<f64> = windows
             .iter()
             .filter(|w| !w.label.starts_with("week "))
@@ -634,6 +639,7 @@ mod tests {
             percent,
             resets_at: Some(NOW + 2 * 3_600 + 9 * 60),
             length_secs: Some(18_000),
+            quiet: false,
         }
     }
 
@@ -733,6 +739,7 @@ mod tests {
                     percent: 42.0,
                     resets_at: Some(NOW + 2 * 3_600 + 9 * 60),
                     length_secs: Some(18_000),
+                    quiet: false,
                 }]
             })
         );

@@ -782,6 +782,26 @@
     background: var(--warn-tint);
     color: var(--warn-ink);
   }
+  .row.pool, .row.pool:hover {
+    background: var(--fill-soft);
+  }
+  .row.pool .avatar {
+    background: var(--surface-card);
+    color: var(--ink-2);
+  }
+  .pool-notes {
+    margin-top: 1px;
+    min-width: 0;
+    font-size: 12.5px;
+    line-height: 17px;
+  }
+  .pool-note {
+    color: var(--ink-3);
+    overflow-wrap: anywhere;
+  }
+  .pool-note.left-out {
+    color: var(--warn-ink);
+  }
   .identity {
     grid-column-start: 2;
     grid-row-start: 1;

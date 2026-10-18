@@ -30,6 +30,10 @@ pub struct Window {
     pub resets_at: Option<i64>,
     /// How long the window runs, when known, so its pace can be judged.
     pub length_secs: Option<i64>,
+    /// A per-model limit nobody has used yet: kept so a total over several
+    /// accounts counts it as 0%, left out wherever one account's limits
+    /// are listed.
+    pub quiet: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -268,6 +272,7 @@ fn codex_window(value: &Value, which: &str) -> Option<Window> {
         percent,
         resets_at: value.get("reset_at").and_then(moment),
         length_secs: length,
+        quiet: false,
     })
 }
 
@@ -341,6 +346,7 @@ pub fn parse_cursor(body: &Value) -> Usage {
             percent,
             resets_at: end,
             length_secs: start.zip(end).map(|(s, e)| e - s).filter(|l| *l > 0),
+            quiet: false,
         }],
     }
 }
@@ -377,6 +383,7 @@ pub fn parse(body: &Value) -> Usage {
                     .and_then(Value::as_str)
                     .and_then(parse_rfc3339),
                 length_secs: Some(length),
+                quiet: false,
             });
         }
     }
@@ -389,16 +396,20 @@ fn window_from_limit(limit: &Value) -> Option<Window> {
     let model = limit
         .pointer("/scope/model/display_name")
         .and_then(Value::as_str);
-    // A per-model weekly limit nobody has touched is noise in a one-line summary.
-    if model.is_some() && percent == 0.0 {
-        return None;
-    }
+    let untouched = model.is_some() && percent == 0.0;
     let (label, length_secs) = match (kind, model) {
         ("session", _) => ("5h".to_owned(), Some(FIVE_HOURS)),
         ("weekly_all", _) => ("week".to_owned(), Some(WEEK)),
         (_, Some(model)) => (format!("week {model}"), Some(WEEK)),
         (other, None) => (other.to_owned(), None),
     };
+    // A per-model weekly limit nobody has touched is noise in a one-line
+    // summary, but a total over accounts needs its 0%. Any other untouched
+    // per-model limit would only repeat `5h` or `week`.
+    let quiet = untouched && label.starts_with("week ");
+    if untouched && !quiet {
+        return None;
+    }
     Some(Window {
         label,
         percent,
@@ -407,17 +418,19 @@ fn window_from_limit(limit: &Value) -> Option<Window> {
             .and_then(Value::as_str)
             .and_then(parse_rfc3339),
         length_secs,
+        quiet,
     })
 }
 
 impl Usage {
     /// `5h 62% (2h10m) · week 48% (4d3h)`
     pub fn summary(&self, now_secs: i64) -> String {
-        if self.windows.is_empty() {
+        let shown: Vec<&Window> = self.windows.iter().filter(|w| !w.quiet).collect();
+        if shown.is_empty() {
             return "no limits reported".into();
         }
-        self.windows
-            .iter()
+        shown
+            .into_iter()
             .map(|w| {
                 let pct = format!("{} {:.0}%", w.label, w.percent);
                 match w.resets_at {
@@ -510,6 +523,7 @@ mod tests {
                 percent: 37.5,
                 resets_at: Some(1_792_592_000),
                 length_secs: Some(2_592_000),
+                quiet: false,
             }]
         );
         // only spend and a limit, in cents
@@ -544,10 +558,13 @@ mod tests {
     }
 
     #[test]
-    fn parses_limits_list_and_drops_untouched_model_limits() {
+    fn parses_limits_list_and_keeps_untouched_model_limits_quiet() {
         let usage = parse(&real_answer());
         let labels: Vec<_> = usage.windows.iter().map(|w| w.label.as_str()).collect();
-        assert_eq!(labels, ["5h", "week", "week Opus"]);
+        assert_eq!(labels, ["5h", "week", "week Fable", "week Opus"]);
+        let quiet: Vec<_> = usage.windows.iter().map(|w| w.quiet).collect();
+        assert_eq!(quiet, [false, false, true, false]);
+        assert_eq!(usage.windows[2].percent, 0.0);
         assert_eq!(usage.windows[0].percent, 62.0);
         assert_eq!(
             usage.windows[0].resets_at,
@@ -562,7 +579,10 @@ mod tests {
             .iter()
             .map(|w| w.length_secs)
             .collect();
-        assert_eq!(lengths, [Some(18_000), Some(604_800), Some(604_800)]);
+        assert_eq!(
+            lengths,
+            [Some(18_000), Some(604_800), Some(604_800), Some(604_800)]
+        );
     }
 
     /// OpenAI's answer as measured (Codex 0.160, 2026-09).
@@ -594,6 +614,7 @@ mod tests {
                 percent: 45.0,
                 resets_at: Some(1_790_628_078),
                 length_secs: Some(604_800),
+                quiet: false,
             }]
         );
     }
@@ -692,6 +713,23 @@ mod tests {
         assert_eq!(usage.windows[0].label, "5h");
         assert_eq!(usage.windows[0].resets_at, None);
         assert_eq!(usage.windows[1].label, "week");
+    }
+
+    #[test]
+    fn a_used_model_limit_is_not_quiet_and_only_quiet_ones_mean_none() {
+        let usage = parse(&json!({"limits": [
+            {"kind": "weekly_scoped", "percent": 0, "scope": {"model": {"display_name": "Fable"}}}
+        ]}));
+        assert!(usage.windows[0].quiet);
+        assert_eq!(usage.summary(0), "no limits reported");
+        let used = parse(&json!({"limits": [
+            {"kind": "weekly_scoped", "percent": 3, "scope": {"model": {"display_name": "Fable"}}}
+        ]}));
+        assert!(!used.windows[0].quiet);
+        let session = parse(&json!({"limits": [
+            {"kind": "session", "percent": 0, "scope": {"model": {"display_name": "Fable"}}}
+        ]}));
+        assert!(session.windows.is_empty());
     }
 
     #[test]

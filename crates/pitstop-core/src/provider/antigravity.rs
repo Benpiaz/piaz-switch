@@ -137,6 +137,7 @@ pub fn quota(blob: &[u8]) -> Option<Usage> {
             percent,
             resets_at,
             length_secs: None,
+            quiet: false,
         };
         match windows.iter_mut().find(|w| w.label == pool) {
             Some(w) if reading.percent > w.percent => *w = reading,

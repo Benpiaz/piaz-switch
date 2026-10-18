@@ -87,6 +87,8 @@ const ICONS = {
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></svg>',
   flame:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21c-3.6 0-6.5-2.6-6.5-6.2 0-3.4 2.4-5.4 3.6-8.3.4 1.9 1.4 3 2.6 3.6C11.5 7 12.6 4.6 14.6 3c.3 3.2 3.9 5.6 3.9 11.2 0 3.9-2.9 6.8-6.5 6.8z"/><path d="M12 21c-1.6 0-2.8-1.2-2.8-2.8 0-1.8 1.5-2.6 2.2-4.2.9 1 3.4 2.2 3.4 4.4 0 1.5-1.2 2.6-2.8 2.6z"/></svg>',
+  layers:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5 3.5 8 12 12.5 20.5 8z"/><path d="m3.5 12 8.5 4.5 8.5-4.5"/><path d="m3.5 16 8.5 4.5 8.5-4.5"/></svg>',
   clock:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 2"/></svg>',
   globe:
@@ -529,6 +531,7 @@ function renderAccounts(moves) {
         h(
           "div",
           { class: "panel" },
+          poolRow(tool, moves),
           tool.accounts.map((account) => accountRow(tool, account, moves)),
         ),
       ),
@@ -630,64 +633,177 @@ function sideOf(tool, account) {
 
 /** One line per limit: name, bar with the even-pace tick, figure, timing. */
 function metersOf(tool, account, moves) {
-  const usage = account.usage;
-  if (!usage || usage.status !== "ok" || !usage.windows.length) return null;
+  const windows = shownWindows(account.usage);
+  if (!windows.length) return null;
   const now = nowSecs();
   const grid = h("div", { class: "meters" });
-  for (const w of usage.windows) {
+  for (const w of windows) {
     // Past its reset a limit has started afresh, before the next read says so.
     const fresh = Boolean(w.resetsAt && w.resetsAt <= now);
-    const used = fresh ? 0 : w.percent;
-    const percent = Math.max(0, Math.min(100, used));
-    const level = used >= 100 ? " out" : used >= 75 ? " low" : "";
-    const fill = h("div", { class: "bar-fill" + level + (percent > 0 ? "" : " none") });
-    fill.style.width = `${percent}%`;
-    const bar = h("div", { class: "bar" }, fill);
-    const pace = fresh ? null : paceOf(w, now);
-    const off = pace && pace.standing !== "even";
-    if (off && pace.standing === "over" && percent < 100) {
-      // The part used ahead of pace, as a share of the fill so it scales with it.
-      const ahead = h("div", { class: "pace-over" });
-      ahead.style.width = `${(100 * (percent - pace.expected)) / percent}%`;
-      fill.append(ahead);
-    }
-    if (off) {
-      const mark = h("div", { class: "pace-mark" + (pace.standing === "over" ? " over" : "") });
-      mark.style.left = `${pace.expected}%`;
-      bar.append(mark);
-      bar.title = t("paceHelp", { n: Math.round(pace.expected) });
-    }
     const resets = fresh ? t("justReset") : w.resetsAt && w.resetsAt > now ? t("resetsIn", { d: duration(w.resetsAt - now) }) : "";
-    const paceWords = off ? t(pace.standing === "over" ? "overPace" : "underPace", { n: Math.round(Math.abs(pace.diff)) }) : "";
-    grid.append(
-      h("span", { class: "meter-label", text: windowName(w.label) }),
-      bar,
-      h("span", { class: "meter-figure" }, String(Math.round(used)), h("span", { class: "unit", text: "%" })),
-      h(
-        "span",
-        { class: "meter-meta" },
-        resets ? h("span", { class: "meter-resets", text: resets }) : null,
-        paceWords ? h("span", { class: "meter-pace" + (pace.standing === "over" ? " over" : ""), text: paceWords }) : null,
-      ),
-    );
-
-    const id = `${rowKey(tool.id, account.name)}|${w.label}`;
-    const before = shownPercents.get(id);
-    shownPercents.set(id, percent);
-    if (before !== percent && !reducedMotion.matches) {
-      moves.push(() => {
-        // A limit that just reset drains to empty before it hides.
-        const draining = percent <= 0 && before > 0;
-        if (draining) fill.classList.remove("none");
-        const move = fill.animate([{ width: `${before === undefined ? 0 : before}%` }, { width: `${percent}%` }], {
-          duration: before === undefined ? 700 : 450,
-          easing: "cubic-bezier(0.165, 0.84, 0.44, 1)",
-        });
-        if (draining) move.finished.then(() => fill.classList.add("none"), () => {});
-      });
-    }
+    meterLine(grid, moves, {
+      id: `${rowKey(tool.id, account.name)}|${w.label}`,
+      label: windowName(w.label),
+      used: fresh ? 0 : w.percent,
+      pace: fresh ? null : paceOf(w, now),
+      resets,
+    });
   }
   return grid;
+}
+
+/** The limits an account lists as its own: those read, less the
+ * per-model ones nobody has used yet (`quiet`), which only totals count. */
+function shownWindows(usage) {
+  return usage && usage.status === "ok" ? usage.windows.filter((w) => !w.quiet) : [];
+}
+
+/** How much of a limit a plan holds next to a plain one: the `5` of
+ * `Max 5x` or `Team 5x`; any plan without such a multiple counts as 1. */
+function planWeight(plan) {
+  const m = /(\d+)x$/i.exec((plan || "").trim());
+  return m ? Number(m[1]) : 1;
+}
+
+/** The accounts of a tool whose limits can be read, when there are enough
+ * of them to pool. */
+function pooledOf(tool) {
+  const read = tool.accounts.filter((a) => shownWindows(a.usage).length);
+  return read.length >= 2 ? read : [];
+}
+
+/** One row ahead of a tool's accounts: each limit over all of them at
+ * once, every account weighed by its plan's size, so the pace reads for
+ * the pool rather than one account at a time. A limit's pace is only
+ * shown when every account's is known. */
+function poolRow(tool, moves) {
+  const accounts = pooledOf(tool);
+  if (!accounts.length) return null;
+  const now = nowSecs();
+  const count = accounts.length;
+  const grid = h("div", { class: "meters" });
+  const labels = [];
+  for (const a of accounts) for (const w of a.usage.windows) if (!labels.includes(w.label)) labels.push(w.label);
+  for (const label of labels) {
+    const found = accounts.map((a) => [a, a.usage.windows.find((x) => x.label === label)]).filter(([, w]) => w);
+    // A per-model limit nobody has touched on any account says nothing.
+    if (found.every(([, w]) => w.quiet)) continue;
+    let used = 0;
+    let expected = 0;
+    let weight = 0;
+    let paced = 0;
+    let reset = false;
+    let nextReset = null;
+    for (const [a, w] of found) {
+      const share = planWeight(a.plan);
+      weight += share;
+      const fresh = Boolean(w.resetsAt && w.resetsAt <= now);
+      reset ||= fresh;
+      // Past 100% an account holds no more than all of its own limit.
+      used += share * (fresh ? 0 : Math.min(100, w.percent));
+      // A limit that just reset is at the start of an even pace.
+      const pace = fresh ? { expected: 0 } : paceOf(w, now);
+      if (pace) {
+        paced++;
+        expected += share * pace.expected;
+      }
+      if (w.resetsAt && w.resetsAt > now && (nextReset === null || w.resetsAt < nextReset)) nextReset = w.resetsAt;
+    }
+    used /= weight;
+    let pace = null;
+    if (paced === found.length) {
+      expected /= weight;
+      const diff = used - expected;
+      pace = { expected, diff, standing: Math.abs(diff) <= 3 ? "even" : diff > 0 ? "over" : "under" };
+    }
+    const n = found.length;
+    meterLine(grid, moves, {
+      // `*` can't be in an account's name, so this never meets a row's id.
+      id: `${tool.id}|*pool|${label}`,
+      label: windowName(label),
+      used,
+      pace,
+      resets: nextReset ? t("poolResets", { d: duration(nextReset - now) }) : reset ? t("justReset") : "",
+      help: n < count ? t("poolHelpSome", { n, total: count }) : t("poolHelp", { n }),
+    });
+  }
+  // Which accounts are in, which are left out, and what each plan weighs,
+  // so the figure can be checked against the rows below.
+  const plans = [...new Set(accounts.map((a) => a.plan || ""))];
+  const weights = plans.map((plan) => `${plan || t("poolPlanUnknown")} ×${planWeight(plan)}`).join(" · ");
+  const names = accounts.map((a) => a.name).join(" · ");
+  const left = tool.accounts.filter((a) => !accounts.includes(a)).map((a) => a.name);
+  const total = tool.accounts.length;
+  const countText = left.length ? t("poolCountOf", { n: count, total }) : t("poolCount", { n: count });
+  return h(
+    "div",
+    { class: "row pool", role: "group", "aria-label": `${t("poolTitle")} · ${countText}` },
+    h("div", { class: "avatar", "aria-hidden": "true" }, icon("layers")),
+    h(
+      "div",
+      { class: "identity" },
+      h("div", { class: "row-title" }, h("span", { class: "row-name", text: t("poolTitle") }), h("span", { class: "tag", text: countText })),
+      h(
+        "div",
+        { class: "pool-notes" },
+        h("div", { class: "pool-note", text: t("poolWho", { names }) }),
+        left.length ? h("div", { class: "pool-note left-out", text: t("poolLeftOut", { names: left.join(" · ") }) }) : null,
+        h("div", { class: "pool-note", text: t("poolNote", { plans: weights }), title: t("poolNoteHelp") }),
+      ),
+    ),
+    grid,
+  );
+}
+
+/** One line of a meters grid: `used` as a bar with the even-pace tick,
+ * the figure, then when it resets and how far off pace it is. */
+function meterLine(grid, moves, { id, label, used, pace, resets, help }) {
+  const percent = Math.max(0, Math.min(100, used));
+  const level = used >= 100 ? " out" : used >= 75 ? " low" : "";
+  const fill = h("div", { class: "bar-fill" + level + (percent > 0 ? "" : " none") });
+  fill.style.width = `${percent}%`;
+  const bar = h("div", { class: "bar" }, fill);
+  const off = pace && pace.standing !== "even";
+  if (off && pace.standing === "over" && percent < 100) {
+    // The part used ahead of pace, as a share of the fill so it scales with it.
+    const ahead = h("div", { class: "pace-over" });
+    ahead.style.width = `${(100 * (percent - pace.expected)) / percent}%`;
+    fill.append(ahead);
+  }
+  if (off) {
+    const mark = h("div", { class: "pace-mark" + (pace.standing === "over" ? " over" : "") });
+    mark.style.left = `${pace.expected}%`;
+    bar.append(mark);
+    bar.title = t("paceHelp", { n: Math.round(pace.expected) });
+  }
+  if (help) bar.title = bar.title ? `${help} · ${bar.title}` : help;
+  const paceWords = off ? t(pace.standing === "over" ? "overPace" : "underPace", { n: Math.round(Math.abs(pace.diff)) }) : "";
+  grid.append(
+    h("span", { class: "meter-label", text: label }),
+    bar,
+    h("span", { class: "meter-figure" }, String(Math.round(used)), h("span", { class: "unit", text: "%" })),
+    h(
+      "span",
+      { class: "meter-meta" },
+      resets ? h("span", { class: "meter-resets", text: resets }) : null,
+      paceWords ? h("span", { class: "meter-pace" + (pace.standing === "over" ? " over" : ""), text: paceWords }) : null,
+    ),
+  );
+
+  const before = shownPercents.get(id);
+  shownPercents.set(id, percent);
+  if (before !== percent && !reducedMotion.matches) {
+    moves.push(() => {
+      // A limit that just reset drains to empty before it hides.
+      const draining = percent <= 0 && before > 0;
+      if (draining) fill.classList.remove("none");
+      const move = fill.animate([{ width: `${before === undefined ? 0 : before}%` }, { width: `${percent}%` }], {
+        duration: before === undefined ? 700 : 450,
+        easing: "cubic-bezier(0.165, 0.84, 0.44, 1)",
+      });
+      if (draining) move.finished.then(() => fill.classList.add("none"), () => {});
+    });
+  }
 }
 
 /** The warm-up row Settings shows for a Claude Code account, when it is on. */
@@ -729,7 +845,7 @@ function notesOf(tool, account) {
         : t("usageFailed", { message: usage.message });
     chips.push(h("span", { class: "chip warn", title: usage.message }, icon("warning"), h("span", { text })));
   }
-  if (usage && usage.status === "ok" && !usage.windows.length) chips.push(h("span", { class: "chip" }, h("span", { text: t("noLimits") })));
+  if (usage && usage.status === "ok" && !shownWindows(usage).length) chips.push(h("span", { class: "chip" }, h("span", { text: t("noLimits") })));
   if (warm) {
     const tone = (warm.standing && WARM_TONES[warm.standing.state]) || "";
     chips.push(
@@ -826,7 +942,7 @@ function nameTip(tool) {
 
 function select(key) {
   selected = key;
-  for (const row of document.querySelectorAll(".row")) row.classList.toggle("selected", row.dataset.key === key);
+  for (const row of document.querySelectorAll(".row[data-key]")) row.classList.toggle("selected", row.dataset.key === key);
 }
 
 function primaryAction(tool, account) {
@@ -837,7 +953,7 @@ function primaryAction(tool, account) {
 
 function onRowKey(event, tool, account) {
   if (event.target !== event.currentTarget) return;
-  const rows = () => [...document.querySelectorAll(".row")];
+  const rows = () => [...document.querySelectorAll(".row[data-key]")];
   const go = (row) => {
     if (!row) return;
     select(row.dataset.key);
