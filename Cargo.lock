@@ -3021,7 +3021,7 @@ dependencies = [
 
 [[package]]
 name = "pitstop-app"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "base64 0.23.1",
  "chrono",
@@ -3042,7 +3042,7 @@ dependencies = [
 
 [[package]]
 name = "pitstop-cli"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -3052,7 +3052,7 @@ dependencies = [
 
 [[package]]
 name = "pitstop-core"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "aes-gcm",
  "base64 0.23.1",

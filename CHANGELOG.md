@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-18
+
+### Changed
+- Adding an account is lighter. The large "add a second account" card is gone,
+  and each tool's group has a small **Add** button that opens the dialog with
+  that tool chosen. The dialog fills in the next name of a numbered series
+  (ben1, ben2 → ben3), ready to accept with Return. It shows the tool choice
+  only when there is one, and has shorter copy.
+
+### Fixed
+- On a slow or patchy network, usage no longer fails with
+  "network: timeout: global": a read gets 30 seconds, one that got no answer is
+  tried once more, and one that still fails says the network didn't answer.
+- A warm-up that couldn't reach the service (offline, timed out) no longer uses
+  one of the day's three tries, so a night without network doesn't leave parked
+  logins expired all day. Retries wait 10, 20, 40 and then 60 minutes.
+
 ## [0.4.0] - 2026-10-17
 
 ### Added
