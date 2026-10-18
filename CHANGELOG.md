@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.5.0] - 2026-10-18
 
 ### Added
 - Cursor and Antigravity (Google's editor for Gemini) accounts, beside Claude Code
@@ -12,11 +12,19 @@
   - Both read their account only when they start, so switching one that is open
     asks first, closes it, switches and opens it again (save your work first). A
     login is never written while the editor is open.
-  - Cursor shows the share of the plan used this billing month; Antigravity the
-    per-model quota it last read itself. Piaz Switch never calls Google.
+  - Cursor shows its plan as Cursor's site names it (Plus, Pro…) and the share
+    of it used this period: a week on the weekly plans such as Plus, a month on
+    the older ones. Antigravity shows the per-model quota it last read itself.
+    Piaz Switch never calls Google.
 - Each tool's mark (Claude's spark, the Codex, Cursor and Antigravity marks) beside
   its name in the account list, the Add Account dialog and the Usage pane. The
   dialog picks a tool from tiles.
+- An **All accounts together** row at the top of each tool's group with two or
+  more accounts: each limit's use and even pace over all of them at once, so it
+  shows whether the accounts as a whole are ahead of or behind pace. Each account
+  weighs by its plan's size (a Max 20x counts 20 times a Pro; a plan without a
+  ×N counts once). The row names the accounts it adds up, any it leaves out, and
+  each plan's weight.
 
 ## [0.4.1] - 2026-10-18
 
