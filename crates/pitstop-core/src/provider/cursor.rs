@@ -25,6 +25,9 @@ pub const MEMBERSHIP: &str = "cursorAuth/stripeMembershipType";
 pub const SUBSCRIPTION: &str = "cursorAuth/stripeSubscriptionStatus";
 pub const PROFILE: &str = "cursorAuth/cachedScopedProfile";
 pub const AUTH_ID: &str = "cursorAuth/authId";
+/// The plan as Cursor's site names it, from a private sign-in: Pitstop's
+/// own row, never written to Cursor (it isn't one of [`KEYS`]).
+pub const PLAN_NAME: &str = "pitstop/planName";
 
 /// Every row of a login, in the order they are read.
 pub const KEYS: [&str; 8] = [
@@ -72,6 +75,8 @@ fn plan_name(membership: &str) -> String {
         "free_trial" => "Free trial".into(),
         "pro" => "Pro".into(),
         "pro_plus" | "pro+" => "Pro+".into(),
+        "plus" => "Plus".into(),
+        "premium" => "Premium".into(),
         "ultra" => "Ultra".into(),
         "business" | "team" | "teams" => "Teams".into(),
         "enterprise" => "Enterprise".into(),
@@ -128,7 +133,8 @@ impl Provider for Cursor {
     }
 
     /// The email from the rows; the user id from the token's `sub`, which
-    /// stays when the email changes; the plan Cursor last saw.
+    /// stays when the email changes; the plan the sign-in read, else the one
+    /// Cursor last saw.
     fn details(&self, blob: &[u8]) -> Details {
         let Some(rows) = rows_of(blob) else {
             return Details::default();
@@ -145,9 +151,14 @@ impl Provider for Cursor {
                 .filter(|e| !e.is_empty()),
             identity: sub.map(|s| format!("{}:", user_id(&s))),
             plan: rows
-                .get(MEMBERSHIP)
-                .filter(|m| !m.is_empty())
-                .map(|m| plan_name(m)),
+                .get(PLAN_NAME)
+                .map(|p| p.trim().to_owned())
+                .filter(|p| !p.is_empty())
+                .or_else(|| {
+                    rows.get(MEMBERSHIP)
+                        .filter(|m| !m.is_empty())
+                        .map(|m| plan_name(m))
+                }),
         }
     }
 
@@ -289,5 +300,36 @@ pub(crate) mod tests {
         assert_eq!(plan_name("free_trial"), "Free trial");
         assert_eq!(plan_name("ultra"), "Ultra");
         assert_eq!(plan_name("something"), "Something");
+    }
+
+    #[test]
+    fn the_plan_a_sign_in_read_beats_cursor_s_cached_one() {
+        let token = fake_jwt(r#"{"sub":"auth0|user_1","exp":4102444800}"#);
+        let blob = |rows: &[(&str, &str)]| {
+            let mut all = BTreeMap::from([(ACCESS_TOKEN.to_owned(), token.clone())]);
+            all.extend(rows.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())));
+            serde_json::to_vec(&all).unwrap()
+        };
+        let signed_in = blob(&[(PLAN_NAME, "Plus"), (MEMBERSHIP, "free")]);
+        assert_eq!(Cursor.details(&signed_in).plan.as_deref(), Some("Plus"));
+        let parked = blob(&[(MEMBERSHIP, "plus")]);
+        assert_eq!(Cursor.details(&parked).plan.as_deref(), Some("Plus"));
+    }
+
+    #[test]
+    fn pitstop_s_own_plan_row_never_reaches_cursor() {
+        let host = FakeHost::new();
+        signed_in(&host, "auth0|user_A", "a@x.com", "pro");
+        let token = fake_jwt(r#"{"sub":"auth0|user_1","exp":4102444800}"#);
+        let rows = BTreeMap::from([
+            (ACCESS_TOKEN.to_owned(), token),
+            (PLAN_NAME.to_owned(), "Plus".to_owned()),
+        ]);
+        Cursor
+            .write_active(&host, &serde_json::to_vec(&rows).unwrap())
+            .unwrap();
+        let db = host.vscdb(&Cursor::db(&host)).unwrap();
+        assert!(db.contains_key(ACCESS_TOKEN));
+        assert!(!db.contains_key(PLAN_NAME));
     }
 }

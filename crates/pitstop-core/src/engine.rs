@@ -375,7 +375,7 @@ impl<H: Host> Engine<H> {
     /// Best-effort usage for every account of both tools. The account that
     /// owns a tool's live login is read with the live token, since its parked
     /// copy may be stale; every other account with its vault copy. Requests
-    /// run in parallel.
+    /// run in parallel. Reading changes nothing; see [`Engine::record_plans`].
     pub fn usage(&self, api: &dyn UsageApi) -> Result<Vec<AccountUsage>> {
         let state = State::load(&self.host)?;
         let now = now_epoch() as i64;
@@ -413,7 +413,7 @@ impl<H: Host> Engine<H> {
             })
             .collect();
 
-        Ok(std::thread::scope(|scope| {
+        let read: Vec<AccountUsage> = std::thread::scope(|scope| {
             let handles: Vec<_> = requests
                 .into_iter()
                 .map(|(meta, request)| {
@@ -434,7 +434,44 @@ impl<H: Host> Engine<H> {
                     },
                 })
                 .collect()
-        }))
+        });
+        Ok(read)
+    }
+
+    /// Where a [`Engine::usage`] read names the plan (Cursor's does), record
+    /// it over the one recorded when the login was parked, which may be out
+    /// of date. State is loaded afresh, so call this as one more change: one
+    /// at a time with the others. Failing to save only leaves the old plan.
+    pub fn record_plans(&self, read: &[AccountUsage]) {
+        let named: Vec<(ProviderId, &str, &str)> = read
+            .iter()
+            .filter_map(|u| match &u.report {
+                UsageReport::Ok(usage) => {
+                    Some((u.provider, u.name.as_str(), usage.plan.as_deref()?))
+                }
+                _ => None,
+            })
+            .collect();
+        if named.is_empty() {
+            return;
+        }
+        let Ok(mut state) = State::load(&self.host) else {
+            return;
+        };
+        let mut changed = false;
+        for (pid, name, plan) in named {
+            let meta = state
+                .accounts
+                .iter_mut()
+                .find(|a| a.provider == pid && a.name == name);
+            if let Some(meta) = meta.filter(|m| m.plan.as_deref() != Some(plan)) {
+                meta.plan = Some(plan.to_owned());
+                changed = true;
+            }
+        }
+        if changed {
+            let _ = state.save(&self.host);
+        }
     }
 }
 
@@ -1253,7 +1290,10 @@ mod tests {
 
         fn cursor(&self, token: &str) -> std::result::Result<serde_json::Value, usage::FetchError> {
             self.seen.lock().unwrap().push(format!("cursor|{token}"));
-            Ok(serde_json::json!({"planUsage": {"totalPercentUsed": 42}}))
+            Ok(serde_json::json!({
+                "planUsage": {"totalPercentUsed": 42},
+                "planInfo": {"planName": "Plus"}
+            }))
         }
     }
 
@@ -1377,6 +1417,24 @@ mod tests {
             )
             .unwrap();
         engine
+    }
+
+    #[test]
+    fn a_read_that_names_the_plan_records_it() {
+        // `a` was parked saying "pro", `b` signed in saying nothing
+        let engine = two_cursor_accounts();
+        let read = engine.usage(&FakeApi::new()).unwrap();
+        // a read alone changes nothing
+        let before = State::load(engine.host()).unwrap();
+        assert_eq!(before.accounts[0].plan.as_deref(), Some("Pro"));
+        engine.record_plans(&read);
+        let state = State::load(engine.host()).unwrap();
+        let plan = |name: &str| {
+            let meta = state.accounts.iter().find(|a| a.name == name).unwrap();
+            meta.plan.clone()
+        };
+        assert_eq!(plan("a").as_deref(), Some("Plus"));
+        assert_eq!(plan("b").as_deref(), Some("Plus"));
     }
 
     #[test]

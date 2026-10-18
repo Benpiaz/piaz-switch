@@ -3,7 +3,8 @@
 //! - Codex: `GET https://chatgpt.com/backend-api/wham/usage` with the account's
 //!   `ChatGPT-Account-ID`, as the Codex CLI sends it;
 //! - Cursor: `POST https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage`,
-//!   as the editor's own usage panel does;
+//!   as the editor's own usage panel does, then `…/GetPlanInfo` for the plan
+//!   as its site names it;
 //! - Antigravity: not asked at all. The quota is the one Antigravity itself
 //!   last read and kept with the login (see `provider::antigravity::quota`).
 //!
@@ -20,6 +21,7 @@ pub const USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
 pub const CODEX_USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
 pub const CURSOR_USAGE_URL: &str =
     "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage";
+pub const CURSOR_PLAN_URL: &str = "https://api2.cursor.sh/aiserver.v1.DashboardService/GetPlanInfo";
 
 /// One rate-limit window, e.g. the five-hour session or the weekly limit.
 #[derive(Debug, Clone, PartialEq)]
@@ -39,6 +41,9 @@ pub struct Window {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Usage {
     pub windows: Vec<Window>,
+    /// The plan as the service names it now, where the answer says (Cursor):
+    /// fresher than the one recorded when the login was parked.
+    pub plan: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -77,7 +82,8 @@ pub trait UsageApi: Sync {
     fn claude(&self, access_token: &str) -> Result<Value, FetchError>;
     /// OpenAI's answer for a Codex access token and its ChatGPT account.
     fn codex(&self, access_token: &str, account_id: &str) -> Result<Value, FetchError>;
-    /// Cursor's answer for its access token: this billing period's use.
+    /// Cursor's answer for its access token: this billing period's use,
+    /// with the plan's `planInfo` beside it when that could be read.
     fn cursor(&self, access_token: &str) -> Result<Value, FetchError>;
 }
 
@@ -162,15 +168,22 @@ impl UsageApi for Http {
     }
 
     fn cursor(&self, access_token: &str) -> Result<Value, FetchError> {
-        let response = call_twice(|| {
+        let post = |url: &str| {
             self.agent
-                .post(CURSOR_USAGE_URL)
+                .post(url)
                 .header("Authorization", format!("Bearer {access_token}"))
                 .header("Connect-Protocol-Version", "1")
                 .header("Content-Type", "application/json")
                 .send("{}")
-        });
-        answer(response, "Cursor")
+        };
+        let mut body = answer(call_twice(|| post(CURSOR_USAGE_URL)), "Cursor")?;
+        // The plan only names the use; the use reads without it.
+        if let Ok(plan) = answer(post(CURSOR_PLAN_URL), "Cursor") {
+            if let (Some(body), Some(info)) = (body.as_object_mut(), plan.get("planInfo")) {
+                body.insert("planInfo".into(), info.clone());
+            }
+        }
+        Ok(body)
     }
 }
 
@@ -255,7 +268,10 @@ pub fn parse_codex(body: &Value) -> Usage {
         .into_iter()
         .filter_map(|which| codex_window(limits.get(which)?, which))
         .collect();
-    Usage { windows }
+    Usage {
+        windows,
+        plan: None,
+    }
 }
 
 fn codex_window(value: &Value, which: &str) -> Option<Window> {
@@ -324,15 +340,26 @@ fn number(value: &Value) -> Option<f64> {
 }
 
 /// This billing period's share of the plan used, the period running from
-/// `billingCycleStart` to `billingCycleEnd` (epoch milliseconds).
+/// `billingCycleStart` to `billingCycleEnd` (epoch milliseconds): a month
+/// on the older plans, a week on those that renew weekly (Plus and up,
+/// since 2026-10). `planInfo.planName` is the plan as Cursor's site shows it.
 pub fn parse_cursor(body: &Value) -> Usage {
+    let name = body
+        .pointer("/planInfo/planName")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .map(str::to_owned);
     let plan = &body["planUsage"];
     let percent = number(&plan["totalPercentUsed"]).or_else(|| {
         let limit = number(&plan["limit"]).filter(|l| *l > 0.0)?;
         Some(number(&plan["totalSpend"])? / limit * 100.0)
     });
     let Some(percent) = percent.filter(|p| *p >= 0.0) else {
-        return Usage::default();
+        return Usage {
+            windows: Vec::new(),
+            plan: name,
+        };
     };
     let secs = |key: &str| {
         number(&body[key])
@@ -340,14 +367,24 @@ pub fn parse_cursor(body: &Value) -> Usage {
             .filter(|s| *s > 0)
     };
     let (start, end) = (secs("billingCycleStart"), secs("billingCycleEnd"));
+    let length_secs = start.zip(end).map(|(s, e)| e - s).filter(|l| *l > 0);
+    let weekly = match body
+        .pointer("/planInfo/includedUsagePeriod")
+        .and_then(Value::as_str)
+    {
+        Some(period) => period.ends_with("WEEKLY"),
+        // Seven days, with a day to spare for clocks and time zones.
+        None => length_secs.is_some_and(|l| l <= WEEK + 86_400),
+    };
     Usage {
         windows: vec![Window {
-            label: "month".into(),
+            label: if weekly { "week" } else { "month" }.into(),
             percent,
             resets_at: end,
-            length_secs: start.zip(end).map(|(s, e)| e - s).filter(|l| *l > 0),
+            length_secs,
             quiet: false,
         }],
+        plan: name,
     }
 }
 
@@ -387,7 +424,10 @@ pub fn parse(body: &Value) -> Usage {
             });
         }
     }
-    Usage { windows }
+    Usage {
+        windows,
+        plan: None,
+    }
 }
 
 fn window_from_limit(limit: &Value) -> Option<Window> {
@@ -526,6 +566,7 @@ mod tests {
                 quiet: false,
             }]
         );
+        assert_eq!(usage.plan, None);
         // only spend and a limit, in cents
         let spend = parse_cursor(&serde_json::json!({
             "planUsage": {"totalSpend": "500", "limit": "2000"}
@@ -534,6 +575,28 @@ mod tests {
         assert!(parse_cursor(&serde_json::json!({"enabled": false}))
             .windows
             .is_empty());
+    }
+
+    /// A Plus account as Cursor answered it, 2026-10: the period is a week,
+    /// and only `planInfo` names the plan (the stripe profile says "free").
+    #[test]
+    fn cursor_reads_a_weekly_plan_and_its_name() {
+        let body = serde_json::json!({
+            "billingCycleStart": "1792635360000",
+            "billingCycleEnd": "1793240160000",
+            "planUsage": {"totalPercentUsed": 0, "autoPercentUsed": 0, "apiPercentUsed": 0},
+            "planInfo": {"planName": "Plus", "includedUsagePeriod": "INCLUDED_USAGE_PERIOD_WEEKLY"}
+        });
+        let usage = parse_cursor(&body);
+        assert_eq!(usage.plan.as_deref(), Some("Plus"));
+        assert_eq!(usage.windows[0].label, "week");
+        assert_eq!(usage.windows[0].length_secs, Some(604_800));
+        // without planInfo, a seven-day period still reads as a week
+        let mut bare = body.clone();
+        bare.as_object_mut().unwrap().remove("planInfo");
+        let usage = parse_cursor(&bare);
+        assert_eq!(usage.windows[0].label, "week");
+        assert_eq!(usage.plan, None);
     }
     use serde_json::json;
 

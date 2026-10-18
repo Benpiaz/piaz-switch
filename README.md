@@ -230,8 +230,10 @@ account in use or a parked account's vault copy. The app refreshes it on start, 
 **Refresh**, after a switch, and every 5 minutes.
 
 Cursor's comes from the endpoint Cursor's own usage panel reads
-(`DashboardService/GetCurrentPeriodUsage`): the share of the plan used this billing
-month. Antigravity's is not asked for at all: it is the per-model quota Antigravity
+(`DashboardService/GetCurrentPeriodUsage`): the share of the plan used this period,
+a week on the weekly plans such as Plus and a month on the older ones. The plan's
+name comes from `DashboardService/GetPlanInfo`, as on Cursor's site.
+Antigravity's is not asked for at all: it is the per-model quota Antigravity
 itself last read and kept with the login, so a parked account shows its quota as of
 when it was last in use (a limit past its reset time shows as reset).
 

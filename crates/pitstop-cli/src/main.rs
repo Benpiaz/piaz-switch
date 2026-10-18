@@ -130,7 +130,9 @@ fn main() {
                 let usage = if offline {
                     Vec::new()
                 } else {
-                    engine.usage(&Http::new())?
+                    let usage = engine.usage(&Http::new())?;
+                    engine.record_plans(&usage);
+                    usage
                 };
                 print_list(&engine.state()?, &usage);
             }

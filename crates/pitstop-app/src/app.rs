@@ -216,6 +216,12 @@ fn start_read(app: &AppHandle) {
         refresh(&app);
         // However the read ends, the next one may start.
         let read_now = std::panic::catch_unwind(|| engine().usage(&Http::new()));
+        if let Ok(Ok(read)) = &read_now {
+            // Recording a plan the read names is a change like any other.
+            let state = app.state::<AppState>();
+            let _op = state.ops.lock();
+            engine().record_plans(read);
+        }
         let plan = {
             let state = app.state::<AppState>();
             let Ok(mut inner) = state.inner.lock() else {

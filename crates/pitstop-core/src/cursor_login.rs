@@ -149,19 +149,25 @@ fn describe(agent: &ureq::Agent, rows: &mut BTreeMap<String, String>) {
     {
         rows.insert(cursor::EMAIL.to_owned(), email.to_owned());
     }
-    let profile = agent
-        .get("https://api2.cursor.sh/auth/full_stripe_profile")
+    // Not `/auth/full_stripe_profile`: since the weekly plans (2026-10) its
+    // `membershipType` says "free" for a Plus account. Cursor's own row is
+    // left for Cursor to fill in.
+    let info = agent
+        .post(crate::usage::CURSOR_PLAN_URL)
         .header("Authorization", format!("Bearer {token}"))
-        .call()
+        .header("Connect-Protocol-Version", "1")
+        .header("Content-Type", "application/json")
+        .send("{}")
         .ok()
         .filter(|r| r.status() == 200)
         .and_then(json);
-    if let Some(plan) = profile
+    if let Some(plan) = info
         .as_ref()
-        .and_then(|p| p.get("membershipType")?.as_str())
+        .and_then(|i| i.pointer("/planInfo/planName")?.as_str())
+        .map(str::trim)
         .filter(|p| !p.is_empty())
     {
-        rows.insert(cursor::MEMBERSHIP.to_owned(), plan.to_owned());
+        rows.insert(cursor::PLAN_NAME.to_owned(), plan.to_owned());
     }
 }
 

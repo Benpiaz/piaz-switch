@@ -548,7 +548,7 @@ mod tests {
             name: "ben2".into(),
             report,
         };
-        let good = UsageReport::Ok(Usage { windows: vec![] });
+        let good = UsageReport::Ok(Usage::default());
         let failed = || UsageReport::Failed(pitstop_core::usage::RATE_LIMITED.into());
         let old = vec![read(good.clone())];
 
@@ -580,7 +580,7 @@ mod tests {
             name: name.into(),
             report,
         };
-        let good = UsageReport::Ok(Usage { windows: vec![] });
+        let good = UsageReport::Ok(Usage::default());
         let failed = || UsageReport::Failed(pitstop_core::usage::RATE_LIMITED.into());
         let old = vec![
             read("ben2", good.clone()),

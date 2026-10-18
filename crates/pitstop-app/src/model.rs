@@ -291,17 +291,26 @@ pub fn build<H: Host>(engine: &Engine<H>, input: &Input) -> Snapshot {
                 .accounts
                 .iter()
                 .filter(|a| a.provider == pid)
-                .map(|a| AccountView {
-                    name: a.name.clone(),
-                    label: a.label.clone(),
-                    plan: a.plan.clone(),
-                    in_use: in_use.as_deref() == Some(a.name.as_str()),
-                    parked_at: a.parked_at,
-                    usage: input
+                .map(|a| {
+                    let report = input
                         .usage
                         .iter()
                         .find(|u| u.provider == pid && u.name == a.name)
-                        .map(|u| UsageView::from(&u.report)),
+                        .map(|u| &u.report);
+                    AccountView {
+                        name: a.name.clone(),
+                        label: a.label.clone(),
+                        // What the last read says beats what the parked login said.
+                        plan: report
+                            .and_then(|r| match r {
+                                UsageReport::Ok(u) => u.plan.clone(),
+                                _ => None,
+                            })
+                            .or_else(|| a.plan.clone()),
+                        in_use: in_use.as_deref() == Some(a.name.as_str()),
+                        parked_at: a.parked_at,
+                        usage: report.map(UsageView::from),
+                    }
                 })
                 .collect();
             ToolView {
@@ -382,7 +391,10 @@ fn windows_of(account: &AccountView) -> Option<&[WindowView]> {
 }
 
 /// For each tool whose account in use has used up a limit: the other account
-/// with the most of that limit left, among those whose usage is known.
+/// with the most of that limit left, among those whose usage is known and
+/// that have no limit used up. Accounts of one tool may name their limits
+/// differently (a Cursor plan renewing weekly or monthly), so one without
+/// that limit isn't taken for one with all of it left.
 fn suggestions(tools: &[ToolView]) -> Vec<Suggestion> {
     tools
         .iter()
@@ -394,11 +406,15 @@ fn suggestions(tools: &[ToolView]) -> Vec<Suggestion> {
                 .iter()
                 .filter(|a| !a.in_use)
                 .filter_map(|a| {
-                    let used = windows_of(a)?
+                    let windows = windows_of(a)?;
+                    if windows.iter().any(|w| w.percent >= 100.0) {
+                        return None;
+                    }
+                    let used = windows
                         .iter()
                         .find(|w| w.label == full.label)
                         .map_or(0.0, |w| w.percent);
-                    (used < 100.0).then_some((a, used))
+                    Some((a, used))
                 })
                 .min_by(|x, y| x.1.total_cmp(&y.1))?;
             Some(Suggestion {
@@ -652,7 +668,10 @@ mod tests {
     }
 
     fn ok(windows: Vec<Window>) -> UsageReport {
-        UsageReport::Ok(Usage { windows })
+        UsageReport::Ok(Usage {
+            windows,
+            plan: None,
+        })
     }
 
     fn snapshot_of(engine: &Engine<FakeHost>, usage: &[AccountUsage]) -> Snapshot {
@@ -723,6 +742,24 @@ mod tests {
     }
 
     #[test]
+    fn a_read_that_names_the_plan_shows_it_over_the_recorded_one() {
+        let engine = work_and_personal();
+        let read = UsageReport::Ok(Usage {
+            windows: vec![window("5h", 42.0)],
+            plan: Some("Max 5x".into()),
+        });
+        let snapshot = snapshot_of(&engine, &[usage_of("work", read)]);
+        let accounts = &claude(&snapshot).accounts;
+        assert_eq!(accounts[0].plan.as_deref(), Some("Max 5x"));
+        // a read that doesn't name it leaves the recorded plan
+        let snapshot = snapshot_of(&engine, &[usage_of("work", ok(vec![]))]);
+        assert_eq!(
+            claude(&snapshot).accounts[0].plan.as_deref(),
+            Some("Max 20x")
+        );
+    }
+
+    #[test]
     fn accounts_carry_their_email_plan_and_usage() {
         let engine = work_and_personal();
         let usage = [usage_of("work", ok(vec![window("5h", 42.0)]))];
@@ -779,6 +816,24 @@ mod tests {
                 window: "5h".into(),
             }]
         );
+    }
+
+    #[test]
+    fn an_account_used_up_under_another_limit_name_is_not_suggested() {
+        let engine = work_and_personal();
+        let week = Window {
+            label: "week".into(),
+            ..window("5h", 100.0)
+        };
+        let month = Window {
+            label: "month".into(),
+            ..window("5h", 100.0)
+        };
+        let usage = [
+            usage_of("work", ok(vec![week])),
+            usage_of("personal", ok(vec![month])),
+        ];
+        assert!(snapshot_of(&engine, &usage).suggestions.is_empty());
     }
 
     #[test]

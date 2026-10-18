@@ -145,7 +145,10 @@ pub fn quota(blob: &[u8]) -> Option<Usage> {
             None => windows.push(reading),
         }
     }
-    Some(Usage { windows })
+    Some(Usage {
+        windows,
+        plan: None,
+    })
 }
 
 impl Antigravity {
