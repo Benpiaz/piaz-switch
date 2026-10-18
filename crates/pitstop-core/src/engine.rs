@@ -264,7 +264,10 @@ impl<H: Host> Engine<H> {
         let pid = meta.provider;
         let prov = provider_for(pid);
         let details = prov.details(blob);
-        if live::is_someone_else(&details, &meta) {
+        // A login that doesn't say whose it is can't be told from someone
+        // else's: it never replaces an account's.
+        let anonymous = details.identity.is_none() && details.label.is_none();
+        if anonymous || live::is_someone_else(&details, &meta) {
             return Err(Error::WrongAccount {
                 name: meta.name,
                 label: details.label,
@@ -277,6 +280,11 @@ impl<H: Host> Engine<H> {
             .and_then(|c| live::owner(&state, pid, &c.details))
             .as_deref()
             == Some(meta.name.as_str());
+        // An open editor would never see the new login, and would write the
+        // old one back: refused before anything changes.
+        if in_use && self.host.editor_running(pid) {
+            return Err(Error::EditorStillOpen(pid.display_name().into()));
+        }
         vault::store(&self.host, &vault_id(pid, &meta.name), blob)?;
         if in_use {
             if let Err(e) = prov.write_active(&self.host, blob) {
@@ -437,6 +445,9 @@ enum Request {
         access_token: String,
         account_id: String,
     },
+    Cursor(String),
+    /// Known without asking anyone.
+    Known(UsageReport),
 }
 
 impl Request {
@@ -465,6 +476,20 @@ impl Request {
                 CodexToken::Expired => Err(UsageReport::Expired),
                 CodexToken::Missing => Err(missing()),
             },
+            ProviderId::Cursor => match crate::provider::cursor::access_token(blob) {
+                Some((_, Some(exp))) if exp <= now => Err(UsageReport::Expired),
+                Some((token, _)) => Ok(Request::Cursor(token)),
+                None => Err(missing()),
+            },
+            ProviderId::Antigravity => Ok(Request::Known(
+                crate::provider::antigravity::quota(blob)
+                    .map(UsageReport::Ok)
+                    .unwrap_or_else(|| {
+                        UsageReport::Failed(
+                            "Antigravity hasn't read this account's quota yet".into(),
+                        )
+                    }),
+            )),
         }
     }
 
@@ -475,6 +500,8 @@ impl Request {
                 access_token,
                 account_id,
             } => usage::codex_report(api.codex(&access_token, &account_id)),
+            Request::Cursor(token) => usage::cursor_report(api.cursor(&token)),
+            Request::Known(report) => report,
         }
     }
 }
@@ -1223,6 +1250,11 @@ mod tests {
                 "secondary_window": null
             }}))
         }
+
+        fn cursor(&self, token: &str) -> std::result::Result<serde_json::Value, usage::FetchError> {
+            self.seen.lock().unwrap().push(format!("cursor|{token}"));
+            Ok(serde_json::json!({"planUsage": {"totalPercentUsed": 42}}))
+        }
     }
 
     fn report_for<'a>(all: &'a [AccountUsage], name: &str) -> &'a UsageReport {
@@ -1309,5 +1341,110 @@ mod tests {
         let all = engine.usage(&FakeApi::new()).unwrap();
         assert_eq!(five_hour(report_for(&all, "personal")), 20.0);
         assert_eq!(five_hour(report_for(&all, "work")), 10.0);
+    }
+
+    // ---- editors
+
+    fn cursor_login(sub: &str, email: &str) -> Vec<u8> {
+        use crate::provider::cursor::{tests::fake_jwt, ACCESS_TOKEN, EMAIL, REFRESH_TOKEN};
+        let token = fake_jwt(&format!(r#"{{"sub":"{sub}","exp":4102444800}}"#));
+        serde_json::to_vec(&std::collections::BTreeMap::from([
+            (ACCESS_TOKEN, token.as_str()),
+            (REFRESH_TOKEN, token.as_str()),
+            (EMAIL, email),
+        ]))
+        .unwrap()
+    }
+
+    fn cursor_live(engine: &Engine<FakeHost>) -> Option<String> {
+        provider_for(ProviderId::Cursor)
+            .read_active(engine.host())
+            .unwrap()
+            .and_then(|a| a.details.label)
+    }
+
+    /// Cursor signed in to a@x.com, enrolled as `a`, and b@x.com added as `b`.
+    fn two_cursor_accounts() -> Engine<FakeHost> {
+        let host = FakeHost::new();
+        crate::provider::cursor::tests::signed_in(&host, "auth0|user_A", "a@x.com", "pro");
+        let engine = Engine::new(host);
+        engine.enroll(ProviderId::Cursor, "a").unwrap();
+        engine
+            .add_signed_in(
+                ProviderId::Cursor,
+                "b",
+                &cursor_login("auth0|user_B", "b@x.com"),
+            )
+            .unwrap();
+        engine
+    }
+
+    #[test]
+    fn a_closed_editor_switches_both_ways_and_keeps_each_login() {
+        let engine = two_cursor_accounts();
+        assert!(matches!(
+            engine.switch("b", Some(ProviderId::Cursor)).unwrap(),
+            SwitchOutcome::Switched { .. }
+        ));
+        assert_eq!(cursor_live(&engine).as_deref(), Some("b@x.com"));
+        assert_eq!(
+            engine.live(ProviderId::Cursor).unwrap(),
+            Live::Account("b".into())
+        );
+        engine.switch("a", Some(ProviderId::Cursor)).unwrap();
+        assert_eq!(cursor_live(&engine).as_deref(), Some("a@x.com"));
+    }
+
+    #[test]
+    fn an_open_editor_is_never_switched_under_it() {
+        let engine = two_cursor_accounts();
+        engine.host().set_editor_open(ProviderId::Cursor, true);
+        assert!(matches!(
+            engine.switch("b", Some(ProviderId::Cursor)),
+            Err(Error::EditorStillOpen(_))
+        ));
+        assert_eq!(cursor_live(&engine).as_deref(), Some("a@x.com"));
+        assert_eq!(
+            engine.live(ProviderId::Cursor).unwrap(),
+            Live::Account("a".into())
+        );
+    }
+
+    #[test]
+    fn signing_in_again_to_an_open_editors_account_changes_nothing() {
+        let engine = two_cursor_accounts();
+        engine.host().set_editor_open(ProviderId::Cursor, true);
+        let parked_before = vault::load(engine.host(), &vault_id(ProviderId::Cursor, "a")).unwrap();
+        let again = cursor_login("auth0|user_A", "a@x.com");
+        assert!(matches!(
+            engine.sign_in_again("a", Some(ProviderId::Cursor), &again),
+            Err(Error::EditorStillOpen(_))
+        ));
+        assert_eq!(
+            vault::load(engine.host(), &vault_id(ProviderId::Cursor, "a")).unwrap(),
+            parked_before
+        );
+        // A parked account isn't in use: its login is replaced.
+        engine
+            .sign_in_again(
+                "b",
+                Some(ProviderId::Cursor),
+                &cursor_login("auth0|user_B", "b@x.com"),
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn a_login_that_says_nothing_of_whose_it_is_never_replaces_an_account() {
+        let engine = two_cursor_accounts();
+        let anonymous = serde_json::to_vec(&std::collections::BTreeMap::from([(
+            crate::provider::cursor::ACCESS_TOKEN,
+            "not-a-jwt",
+        )]))
+        .unwrap();
+        assert!(matches!(
+            engine.sign_in_again("b", Some(ProviderId::Cursor), &anonymous),
+            Err(Error::WrongAccount { .. })
+        ));
     }
 }

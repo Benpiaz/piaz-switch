@@ -179,7 +179,8 @@ impl Lang {
         )
     }
 
-    /// `5h` → `5-hour`, `week` → `weekly`, `week Opus` → `weekly Opus`.
+    /// `5h` → `5-hour`, `week` → `weekly`, `week Opus` → `weekly Opus`,
+    /// `month` → `monthly`.
     pub fn window(self, label: &str) -> String {
         let (head, rest) = label.split_once(' ').unwrap_or((label, ""));
         let head = match (self, head) {
@@ -187,6 +188,8 @@ impl Lang {
             (Lang::En, "week") => "weekly",
             (Lang::Vi, "5h") => "5 giờ",
             (Lang::Vi, "week") => "tuần",
+            (Lang::En, "month") => "monthly",
+            (Lang::Vi, "month") => "tháng",
             (_, other) => other,
         };
         if rest.is_empty() {

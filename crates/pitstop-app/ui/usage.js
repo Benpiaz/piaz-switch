@@ -18,24 +18,9 @@ const usage = {
 const USAGE_TOOLS = ["claude-code", "codex"];
 const USAGE_RANGES = ["24h", "7d", "30d", "90d"];
 
-const TOOL_ICONS = {
-  // A plain eight-spoke spark and a plain hexagon: marks for the two
-  // tools, not their makers' logos.
-  "claude-code":
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><path d="M12 3.5v17M3.5 12h17M6 6l12 12M18 6 6 18"/></svg>',
-  codex:
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M12 3 19.8 7.5v9L12 21l-7.8-4.5v-9z"/><path d="M12 8.2 15.3 10.1v3.8L12 15.8l-3.3-1.9v-3.8z"/></svg>',
-};
-
 ICONS.usage =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5h16"/><path d="M6.5 16v-4M11 16V7.5M15.5 16v-6M20 16V5"/></svg>';
 ICONS.chevron = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 10 5 5 5-5"/></svg>';
-
-function toolIcon(id) {
-  const holder = document.createElement("span");
-  holder.innerHTML = TOOL_ICONS[id] || TOOL_ICONS.codex;
-  return holder.firstChild;
-}
 
 // ---------- reading ----------
 
@@ -301,7 +286,7 @@ function summaryOf(view) {
           "div",
           { class: "tool-line" },
           h("span", { class: `series-dot ${tool.id}`, "aria-hidden": "true" }),
-          h("span", { class: `tool-mark ${tool.id}`, "aria-hidden": "true" }, toolIcon(tool.id)),
+          h("span", { class: `tool-mark ${tool.id}`, "aria-hidden": "true" }, toolLogo(tool.id)),
           h("span", { class: "tool-name" }, h("span", { text: tool.name }), h("span", { class: "tool-sessions", text: sessionsText(tool.sessions) })),
           h("span", { class: "tool-value", text: cost ? money(tool.cost) : compact(tool.tokens) }),
           h(
@@ -360,7 +345,7 @@ function breakdownOf(answer, view) {
     if (by === "tokens") models.sort((a, b) => b.tokens - a.tokens);
     rows = models.map((m) =>
       tableRow(
-        h("span", { class: "cell-name" }, h("span", { class: `tool-mark ${m.tool}`, title: (toolOf(m.tool) || { name: m.tool }).name }, toolIcon(m.tool)), h("span", { class: "model-name", text: m.model })),
+        h("span", { class: "cell-name" }, h("span", { class: `tool-mark ${m.tool}`, title: (toolOf(m.tool) || { name: m.tool }).name }, toolLogo(m.tool)), h("span", { class: "model-name", text: m.model })),
         m.cost === null ? h("span", { class: "unpriced", text: t("unpriced") }) : money(m.cost),
         by === "cost" && m.cost === null ? "—" : percent(shareOf(m)),
         compact(m.tokens),
@@ -624,7 +609,7 @@ function renderLimits(moves) {
       h(
         "section",
         { class: "group", "aria-label": tool.name },
-        h("h2", { class: "group-head" }, h("span", { class: `tool-mark ${tool.id}`, "aria-hidden": "true" }, toolIcon(tool.id)), h("span", { text: tool.name })),
+        h("h2", { class: "group-head" }, h("span", { class: `tool-mark ${tool.id}`, "aria-hidden": "true" }, toolLogo(tool.id)), h("span", { text: tool.name })),
         h(
           "div",
           { class: "panel" },

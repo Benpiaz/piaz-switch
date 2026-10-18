@@ -183,13 +183,13 @@ fn switch(app: &AppHandle, provider: &str, name: &str) {
     let app = app.clone();
     let name = name.to_owned();
     std::thread::spawn(
-        move || match crate::commands::switch(&app, pid, &name, false) {
-            Ok(asked) if asked.needs_confirmation => {
+        move || match crate::commands::switch(&app, pid, &name, false, false) {
+            Ok(asked) if asked.needs_confirmation || asked.needs_restart => {
                 app::show_window(&app);
                 let _ = app.emit(
                     "open-dialog",
                     serde_json::json!({
-                        "kind": "confirm-switch",
+                        "kind": if asked.needs_restart { "confirm-restart" } else { "confirm-switch" },
                         "provider": pid.as_str(),
                         "name": name,
                         "label": asked.replaced_label,

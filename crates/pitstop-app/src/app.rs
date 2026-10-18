@@ -353,7 +353,7 @@ fn auto_switch(app: &AppHandle, lang: Lang, plan: &duty::SwitchPlan) {
         *tries += 1;
     }
     let tool = ProviderId::ClaudeCode.display_name();
-    match crate::commands::switch(app, ProviderId::ClaudeCode, &plan.to, false) {
+    match crate::commands::switch(app, ProviderId::ClaudeCode, &plan.to, false, false) {
         Ok(done) if done.switched => {
             if let Ok(mut auto) = state.automatic.lock() {
                 auto.sent.insert(key);
@@ -623,6 +623,8 @@ pub fn look_for_tools(app: &AppHandle, now: bool) -> bool {
 pub fn start_background(app: &AppHandle) {
     let handle = app.clone();
     std::thread::spawn(move || {
+        // What a sign-in left when the app or the computer stopped under it.
+        pitstop_core::signin::sweep_leftovers();
         refresh(&handle);
         look_for_tools(&handle, true);
         refresh(&handle);

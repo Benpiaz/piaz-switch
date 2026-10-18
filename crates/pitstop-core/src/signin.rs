@@ -11,21 +11,36 @@
 //!   opens the browser, prints the https address on stderr and reads nothing.
 //!   It revokes whatever login its home holds before it signs in, which is
 //!   why that home is always a fresh, empty directory and never the real one.
+//!
+//! The editors have no command to sign in with:
+//! - Cursor signs in on its site, as its own command line does (see
+//!   [`crate::cursor_login`]); the tokens land in the private directory.
+//! - Antigravity opens as itself with the private directory as its data
+//!   directory, a window apart from the one in daily use; the user signs in
+//!   to Google there, and once the login is in its database the window is
+//!   closed. Nothing but Antigravity itself talks to Google.
 
 use std::collections::HashSet;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
+use crate::cursor_login::{self, Polled};
+use crate::editor;
 use crate::error::{Error, Result};
-use crate::host::Host;
+use crate::host::{Host, RealHost};
 use crate::provider::{provider_for, ProviderId};
 
+/// The command a tool runs as, or for an editor the name it goes by.
 pub fn program_name(provider: ProviderId) -> &'static str {
     match provider {
         ProviderId::ClaudeCode => "claude",
         ProviderId::Codex => "codex",
+        ProviderId::Cursor => "Cursor",
+        ProviderId::Antigravity => "Antigravity",
     }
 }
 
@@ -113,10 +128,13 @@ pub fn find_in(name: &str, dirs: &[PathBuf]) -> Option<PathBuf> {
         .find(|path| path.is_file())
 }
 
-/// Where `provider`'s tool is, if anywhere. `home` is the real home
-/// directory, where installers put the tools.
+/// Where `provider`'s tool is, if anywhere: a command, or an editor app.
+/// `home` is the real home directory, where installers put the tools.
 pub fn find_program(provider: ProviderId, home: &Path) -> Option<PathBuf> {
-    find_in(program_name(provider), &search_path(home))
+    match editor::app(provider) {
+        Some(app) => app.find(home),
+        None => find_in(program_name(provider), &search_path(home)),
+    }
 }
 
 /// The sign-in command for `provider`, with `dir` as the tool's home and
@@ -136,6 +154,8 @@ pub fn command(provider: ProviderId, program: &Path, dir: &Path, search: &[PathB
                 .env("CODEX_HOME", dir)
                 .current_dir(dir);
         }
+        // Editors don't sign in through a command: see `Session::start`.
+        ProviderId::Cursor | ProviderId::Antigravity => {}
     }
     if let Ok(path) = std::env::join_paths(search) {
         cmd.env("PATH", path);
@@ -165,7 +185,7 @@ pub fn progress(provider: ProviderId, said: &str, since_code: &str) -> Progress 
             wants_code: said.contains("Paste code"),
             refused_code: plain(since_code).contains("Invalid code"),
         },
-        ProviderId::Codex => Progress {
+        ProviderId::Codex | ProviderId::Cursor | ProviderId::Antigravity => Progress {
             url,
             ..Progress::default()
         },
@@ -281,28 +301,106 @@ impl PrivateDir {
 
 impl Drop for PrivateDir {
     fn drop(&mut self) {
-        let _ = provider_for(self.provider)
-            .discard_signed_in(&crate::host::RealHost::new(), &self.path);
-        let _ = std::fs::remove_dir_all(&self.path);
+        let _ = provider_for(self.provider).discard_signed_in(&RealHost::new(), &self.path);
+        // A just-closed editor can hold its files for a moment, and what it
+        // left holds a login: try again before giving up.
+        for tries in 1..=12 {
+            if std::fs::remove_dir_all(&self.path).is_ok() || !self.path.exists() || tries == 12 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100 * tries));
+        }
     }
 }
 
-/// A sign-in running in a private directory, its output piped back here.
-/// Dropping it stops the tool and deletes the directory.
+/// What a sign-in runs as.
+enum Run {
+    /// The tool's own command, its output piped back here.
+    Command {
+        child: Child,
+        stdin: Option<ChildStdin>,
+        said: Arc<Mutex<String>>,
+        code_sent_at: usize,
+    },
+    /// The editor itself, with the private directory as its data.
+    Editor {
+        child: Child,
+        /// When its database first held a login.
+        got_login: Option<Instant>,
+        looked: Option<Instant>,
+    },
+    /// The sign-in page in the browser, polled for its answer.
+    Browser {
+        url: String,
+        polled: Arc<Mutex<Polled>>,
+        stop: Arc<AtomicBool>,
+    },
+}
+
+/// Delete what sign-ins and warm-ups left in the temporary folder when the
+/// app or the computer stopped under them: they may hold a login. Only those
+/// older than an hour, so one running in another copy is left alone.
+pub fn sweep_leftovers() {
+    let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else {
+        return;
+    };
+    let hour = Duration::from_secs(3600);
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !(name.starts_with("pitstop-signin-") || name.starts_with("pitstop-warm-")) {
+            continue;
+        }
+        let old = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|at| at.elapsed().ok())
+            .is_some_and(|age| age > hour);
+        if old && entry.path().is_dir() {
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
+    }
+}
+
+/// A sign-in running in a private directory. Dropping it stops it and
+/// deletes the directory.
 pub struct Session {
     provider: ProviderId,
-    child: Child,
-    stdin: Option<ChildStdin>,
-    said: Arc<Mutex<String>>,
-    code_sent_at: usize,
+    run: Run,
     // Last, so the directory goes after the tool has stopped.
     dir: PrivateDir,
+}
+
+fn no_window(cmd: &mut Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    // Its own process group, so a cancel reaches what an npm shim starts.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    #[cfg(not(any(windows, unix)))]
+    let _ = cmd;
 }
 
 impl Session {
     /// Start `provider`'s sign-in. `home` is the real home directory, where
     /// installers put the tools.
     pub fn start(provider: ProviderId, home: &Path) -> Result<Session> {
+        match provider {
+            ProviderId::Cursor => Self::in_browser(provider),
+            ProviderId::Antigravity => Self::in_editor(provider, home),
+            ProviderId::ClaudeCode | ProviderId::Codex => Self::by_command(provider, home),
+        }
+    }
+
+    fn by_command(provider: ProviderId, home: &Path) -> Result<Session> {
         let search = search_path(home);
         let program = find_in(program_name(provider), &search)
             .ok_or_else(|| Error::ToolNotFound(program_name(provider).into()))?;
@@ -311,18 +409,7 @@ impl Session {
         cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-            cmd.creation_flags(CREATE_NO_WINDOW);
-        }
-        // Its own process group, so a cancel reaches what an npm shim starts.
-        #[cfg(unix)]
-        {
-            use std::os::unix::process::CommandExt;
-            cmd.process_group(0);
-        }
+        no_window(&mut cmd);
         let mut child = cmd
             .spawn()
             .map_err(|e| Error::SignIn(format!("could not start {}: {e}", program.display())))?;
@@ -351,10 +438,51 @@ impl Session {
         }
         Ok(Session {
             provider,
-            stdin: child.stdin.take(),
-            child,
-            said,
-            code_sent_at: 0,
+            run: Run::Command {
+                stdin: child.stdin.take(),
+                child,
+                said,
+                code_sent_at: 0,
+            },
+            dir,
+        })
+    }
+
+    fn in_editor(provider: ProviderId, home: &Path) -> Result<Session> {
+        let app = editor::app(provider).expect("an editor");
+        let dir = PrivateDir::create(provider)?;
+        let mut cmd = app.private_command(home, dir.path())?;
+        // Its own process group on Unix, so closing it reaches its helpers.
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            cmd.process_group(0);
+        }
+        let child = cmd.spawn().map_err(|e| {
+            Error::SignIn(format!("could not open {}: {e}", provider.display_name()))
+        })?;
+        Ok(Session {
+            provider,
+            run: Run::Editor {
+                child,
+                got_login: None,
+                looked: None,
+            },
+            dir,
+        })
+    }
+
+    fn in_browser(provider: ProviderId) -> Result<Session> {
+        let dir = PrivateDir::create(provider)?;
+        let pkce = cursor_login::Pkce::new();
+        let url = pkce.login_url();
+        let stop = Arc::new(AtomicBool::new(false));
+        let polled = cursor_login::poll(pkce, dir.path().to_path_buf(), Arc::clone(&stop));
+        // The page can still be opened from the window if this fails.
+        let _ = editor::open_in_browser(&url);
+        Ok(Session {
+            provider,
+            run: Run::Browser { url, polled, stop },
             dir,
         })
     }
@@ -368,13 +496,29 @@ impl Session {
     }
 
     fn said(&self) -> String {
-        self.said.lock().map(|s| s.clone()).unwrap_or_default()
+        match &self.run {
+            Run::Command { said, .. } => said.lock().map(|s| s.clone()).unwrap_or_default(),
+            Run::Editor { .. } => String::new(),
+            Run::Browser { polled, .. } => match polled.lock().map(|p| p.clone()) {
+                Ok(Polled::Failed(why)) => why,
+                _ => String::new(),
+            },
+        }
     }
 
     pub fn progress(&self) -> Progress {
-        let said = self.said();
-        let since = said.get(self.code_sent_at..).unwrap_or("");
-        progress(self.provider, &said, since)
+        match &self.run {
+            Run::Command { code_sent_at, .. } => {
+                let said = self.said();
+                let since = said.get(*code_sent_at..).unwrap_or("");
+                progress(self.provider, &said, since)
+            }
+            Run::Editor { .. } => Progress::default(),
+            Run::Browser { url, .. } => Progress {
+                url: Some(url.clone()),
+                ..Progress::default()
+            },
+        }
     }
 
     /// What the tool printed, escapes removed, for a failure message.
@@ -384,9 +528,17 @@ impl Session {
 
     /// Type the code from the browser into the tool.
     pub fn send_code(&mut self, code: &str) -> Result<()> {
-        self.code_sent_at = self.said.lock().map(|s| s.len()).unwrap_or(0);
-        let stdin = self
-            .stdin
+        let Run::Command {
+            stdin,
+            said,
+            code_sent_at,
+            ..
+        } = &mut self.run
+        else {
+            return Err(Error::SignIn("this sign-in reads no code".into()));
+        };
+        *code_sent_at = said.lock().map(|s| s.len()).unwrap_or(0);
+        let stdin = stdin
             .as_mut()
             .ok_or_else(|| Error::SignIn("the sign-in no longer reads a code".into()))?;
         writeln!(stdin, "{}", code.trim())
@@ -394,22 +546,66 @@ impl Session {
             .map_err(|e| Error::SignIn(format!("could not send the code: {e}")))
     }
 
-    /// `Some(true)` once the tool finished signing in, `Some(false)` once it
-    /// gave up, `None` while it runs.
+    /// `Some(true)` once the sign-in left a login, `Some(false)` once it gave
+    /// up, `None` while it runs.
     pub fn try_finish(&mut self) -> Result<Option<bool>> {
-        self.child
-            .try_wait()
-            .map(|status| status.map(|s| s.success()))
-            .map_err(|e| Error::SignIn(format!("lost track of the sign-in: {e}")))
+        let provider = self.provider;
+        let dir = self.dir.path().to_path_buf();
+        match &mut self.run {
+            Run::Command { child, .. } => child
+                .try_wait()
+                .map(|status| status.map(|s| s.success()))
+                .map_err(|e| Error::SignIn(format!("lost track of the sign-in: {e}"))),
+            Run::Browser { polled, .. } => Ok(match polled.lock().map(|p| p.clone()) {
+                Ok(Polled::Done) => Some(true),
+                Ok(Polled::Failed(_)) => Some(false),
+                _ => None,
+            }),
+            Run::Editor {
+                child,
+                got_login,
+                looked,
+            } => {
+                // Its database is opened at most once a second.
+                if looked.is_some_and(|at| at.elapsed() < Duration::from_secs(1)) {
+                    return Ok(None);
+                }
+                *looked = Some(Instant::now());
+                let login = provider_for(provider)
+                    .read_signed_in(&RealHost::new(), &dir)
+                    .ok()
+                    .flatten();
+                // The address follows the tokens: a login is taken only with
+                // it, since without it nobody can tell whose it is.
+                if let Some(login) = login {
+                    got_login.get_or_insert_with(Instant::now);
+                    if login.details.label.is_some() {
+                        return Ok(Some(true));
+                    }
+                    return Ok(None);
+                }
+                // Closed before signing in.
+                match child.try_wait() {
+                    Ok(Some(_)) => Ok(Some(false)),
+                    Ok(None) => Ok(None),
+                    Err(e) => Err(Error::SignIn(format!("lost track of the sign-in: {e}"))),
+                }
+            }
+        }
     }
 }
 
 impl Drop for Session {
     fn drop(&mut self) {
-        if let Ok(None) = self.child.try_wait() {
-            kill_tree(&mut self.child);
+        match &mut self.run {
+            Run::Command { child, .. } | Run::Editor { child, .. } => {
+                if let Ok(None) = child.try_wait() {
+                    kill_tree(child);
+                }
+                let _ = child.wait();
+            }
+            Run::Browser { stop, .. } => stop.store(true, Ordering::SeqCst),
         }
-        let _ = self.child.wait();
     }
 }
 
@@ -440,6 +636,12 @@ pub fn kill_tree(child: &mut Child) {
 /// prints its own address and reads its own code. Returns the directory
 /// holding what it saved.
 pub fn run_in_terminal(provider: ProviderId, home: &Path) -> Result<PrivateDir> {
+    if provider.is_editor() {
+        return Err(Error::SignIn(format!(
+            "add {} accounts in the Piaz Switch window",
+            provider.display_name()
+        )));
+    }
     let search = search_path(home);
     let program = find_in(program_name(provider), &search)
         .ok_or_else(|| Error::ToolNotFound(program_name(provider).into()))?;

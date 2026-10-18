@@ -429,8 +429,11 @@ impl Ledger {
         let fresh = || FileScan {
             read: 0,
             log: match tool {
-                ProviderId::ClaudeCode => Log::Claude(ClaudeLog::default()),
                 ProviderId::Codex => Log::Codex(CodexLog::default()),
+                // Only Claude Code's and Codex's logs are walked.
+                ProviderId::ClaudeCode | ProviderId::Cursor | ProviderId::Antigravity => {
+                    Log::Claude(ClaudeLog::default())
+                }
             },
         };
         let scan = self.files.entry(path.to_path_buf()).or_insert_with(fresh);

@@ -6,7 +6,7 @@ use pitstop_core::engine::{AccountUsage, RemoveOutcome, SwitchOutcome};
 use pitstop_core::usage::Http;
 use pitstop_core::{signin, Engine, ProviderId, RealHost, State};
 
-/// Park and switch Claude Code / Codex accounts without signing out.
+/// Park and switch Claude Code, Codex, Cursor and Antigravity accounts without signing out.
 #[derive(Parser)]
 #[command(name = "piaz-switch", version, about)]
 struct Cli {
@@ -25,7 +25,7 @@ enum Command {
     Enroll {
         /// Account name (letters, digits, - and _)
         name: String,
-        /// claude-code or codex
+        /// claude-code, codex, cursor or antigravity
         #[arg(short, long)]
         provider: String,
         /// Sign in to a new account through the tool's own sign-in, in a
@@ -35,7 +35,7 @@ enum Command {
     },
     /// Show enrolled accounts, which one is active, and their usage.
     List {
-        /// Skip asking Anthropic and OpenAI for usage.
+        /// Skip asking the services for usage.
         #[arg(long)]
         offline: bool,
     },
@@ -71,7 +71,7 @@ fn parse_provider(s: Option<&str>) -> Result<Option<ProviderId>> {
 fn print_list(state: &State, usage: &[AccountUsage]) {
     if state.accounts.is_empty() {
         println!("No accounts enrolled yet. Park the login a tool is using with:");
-        println!("  piaz-switch enroll <name> --provider claude-code|codex");
+        println!("  piaz-switch enroll <name> --provider claude-code|codex|cursor|antigravity");
         println!("or sign in to another account with --sign-in.");
         return;
     }
@@ -122,7 +122,7 @@ fn main() {
         Some(home) => RealHost::with_home(home),
         None => RealHost::new(),
     };
-    let engine = Engine::new(host);
+    let engine = Engine::new(host.clone());
 
     let result = (|| -> Result<()> {
         match cli.command.unwrap_or(Command::List { offline: false }) {
@@ -170,7 +170,21 @@ fn main() {
                 );
             }
             Command::Use { name, provider } => {
-                match engine.switch(&name, parse_provider(provider.as_deref())?)? {
+                let provider = parse_provider(provider.as_deref())?;
+                // An editor reads its account only when it starts: it is
+                // switched while closed.
+                let editor = State::load(&host)?
+                    .accounts
+                    .iter()
+                    .filter(|a| a.name == name && provider.is_none_or(|p| p == a.provider))
+                    .find_map(|a| pitstop_core::editor::app(a.provider));
+                if let Some(app) = editor.filter(|app| app.running()) {
+                    anyhow::bail!(
+                        "{0} is open; quit {0}, run this again, then open {0}",
+                        app.provider.display_name()
+                    );
+                }
+                match engine.switch(&name, provider)? {
                     SwitchOutcome::AlreadyActive => println!("`{name}` is already active."),
                     // `switch` replaces an unmanaged login; only the careful one stops.
                     SwitchOutcome::WouldReplace(_) => unreachable!("switch never stops to ask"),

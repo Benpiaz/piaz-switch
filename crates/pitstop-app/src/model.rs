@@ -186,6 +186,7 @@ impl From<&Error> for UiError {
             Error::VaultCorrupt(_) => "vaultCorrupt",
             Error::ToolNotFound(_) => "toolNotFound",
             Error::SignIn(_) => "signIn",
+            Error::EditorStillOpen(_) => "editorStillOpen",
             Error::Io { .. } => "io",
             Error::Keystore(_) => "keystore",
             Error::InvalidData(_) => "invalidData",
@@ -195,7 +196,8 @@ impl From<&Error> for UiError {
             | Error::WrongAccount { name, .. }
             | Error::DuplicateAccount(name, _)
             | Error::UnknownAccount(name)
-            | Error::InvalidName(name) => Some(name.clone()),
+            | Error::InvalidName(name)
+            | Error::EditorStillOpen(name) => Some(name.clone()),
             _ => None,
         };
         UiError {
@@ -256,7 +258,18 @@ pub fn build<H: Host>(engine: &Engine<H>, input: &Input) -> Snapshot {
     snapshot.tools = ProviderId::ALL
         .iter()
         .map(|&pid| {
-            let live = engine.live(pid);
+            let installed = input
+                .installed
+                .iter()
+                .find(|(p, _)| *p == pid)
+                .map(|(_, found)| *found);
+            // An editor's data outlives the editor: once it is gone, the
+            // login it left is nobody's business.
+            let live = if pid.is_editor() && installed == Some(false) {
+                Ok(Live::LoggedOut)
+            } else {
+                engine.live(pid)
+            };
             // An unreadable login leaves the record as the best guess.
             let in_use = match &live {
                 Ok(Live::Account(name)) => Some(name.clone()),
@@ -291,11 +304,7 @@ pub fn build<H: Host>(engine: &Engine<H>, input: &Input) -> Snapshot {
             ToolView {
                 id: pid.as_str(),
                 name: pid.display_name(),
-                installed: input
-                    .installed
-                    .iter()
-                    .find(|(p, _)| *p == pid)
-                    .map(|(_, found)| *found),
+                installed,
                 live,
                 accounts,
             }

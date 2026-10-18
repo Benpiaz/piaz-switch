@@ -1,5 +1,7 @@
+pub mod antigravity;
 pub mod claude_code;
 pub mod codex;
+pub mod cursor;
 
 use std::path::Path;
 
@@ -14,22 +16,40 @@ pub enum ProviderId {
     ClaudeCode,
     #[serde(rename = "codex")]
     Codex,
+    #[serde(rename = "cursor")]
+    Cursor,
+    #[serde(rename = "antigravity")]
+    Antigravity,
 }
 
 impl ProviderId {
-    pub const ALL: [ProviderId; 2] = [ProviderId::ClaudeCode, ProviderId::Codex];
+    pub const ALL: [ProviderId; 4] = [
+        ProviderId::ClaudeCode,
+        ProviderId::Codex,
+        ProviderId::Cursor,
+        ProviderId::Antigravity,
+    ];
 
     pub fn as_str(&self) -> &'static str {
         match self {
             ProviderId::ClaudeCode => "claude-code",
             ProviderId::Codex => "codex",
+            ProviderId::Cursor => "cursor",
+            ProviderId::Antigravity => "antigravity",
         }
+    }
+
+    /// An editor app rather than a command line (see [`crate::editor`]).
+    pub fn is_editor(&self) -> bool {
+        crate::editor::app(*self).is_some()
     }
 
     pub fn display_name(&self) -> &'static str {
         match self {
             ProviderId::ClaudeCode => "Claude Code",
             ProviderId::Codex => "Codex",
+            ProviderId::Cursor => "Cursor",
+            ProviderId::Antigravity => "Antigravity",
         }
     }
 
@@ -37,8 +57,10 @@ impl ProviderId {
         match s {
             "claude-code" | "claude" => Ok(ProviderId::ClaudeCode),
             "codex" => Ok(ProviderId::Codex),
+            "cursor" => Ok(ProviderId::Cursor),
+            "antigravity" | "gemini" => Ok(ProviderId::Antigravity),
             other => Err(Error::InvalidData(format!(
-                "unknown provider `{other}` (use claude-code or codex)"
+                "unknown provider `{other}` (use claude-code, codex, cursor or antigravity)"
             ))),
         }
     }
@@ -108,5 +130,7 @@ pub fn provider_for(id: ProviderId) -> Box<dyn Provider> {
     match id {
         ProviderId::ClaudeCode => Box::new(claude_code::ClaudeCode::for_this_os()),
         ProviderId::Codex => Box::new(codex::Codex),
+        ProviderId::Cursor => Box::new(cursor::Cursor),
+        ProviderId::Antigravity => Box::new(antigravity::Antigravity),
     }
 }

@@ -36,6 +36,8 @@ pub enum Error {
     ToolNotFound(String),
     #[error("{0}")]
     SignIn(String),
+    #[error("{0} is still open; close it, then try again")]
+    EditorStillOpen(String),
     #[error("keystore error: {0}")]
     Keystore(String),
     #[error("invalid data: {0}")]

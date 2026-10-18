@@ -4,8 +4,8 @@
 
 # Piaz Switch
 
-**Switch between your Claude Code and Codex accounts in one click — without signing
-out — and see how much each account has left.**
+**Switch between your Claude Code, Codex, Cursor and Antigravity accounts in one
+click — without signing out — and see how much each account has left.**
 
 [![CI](https://github.com/Benpiaz/piaz-switch/actions/workflows/ci.yml/badge.svg)](https://github.com/Benpiaz/piaz-switch/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/Benpiaz/piaz-switch)](https://github.com/Benpiaz/piaz-switch/releases/latest)
@@ -22,7 +22,8 @@ Made by **Ben Piaz** · [YouTube @benpiaz](https://www.youtube.com/@benpiaz) · 
 ---
 
 Piaz Switch is a free tray / menu bar app (plus a `piaz-switch` command line) for
-people who use more than one **Claude Code** or **Codex CLI** account:
+people who use more than one **Claude Code**, **Codex CLI**, **Cursor** or
+**Antigravity** (Google's editor for Gemini) account:
 
 - **Switch accounts instantly** from the tray menu; open Claude Code sessions follow.
 - **See every account's limits** — 5-hour, weekly and per-model usage, reset times
@@ -97,8 +98,9 @@ All versions: [Releases](https://github.com/Benpiaz/piaz-switch/releases).
 The app then lives in the system tray (Windows: maybe behind the `^` by the clock —
 drag it onto the taskbar) or the menu bar (macOS).
 
-You also need the tools themselves: [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
-and/or the [Codex CLI](https://github.com/openai/codex), signed in once.
+You also need the tools themselves: [Claude Code](https://docs.anthropic.com/en/docs/claude-code),
+the [Codex CLI](https://github.com/openai/codex), [Cursor](https://cursor.com) and/or
+[Antigravity](https://antigravity.google), signed in once.
 
 **Updates.** From 0.3.0 on, the app looks for a new version every few hours and
 says when there is one (a notification, and an item at the top of the tray menu).
@@ -115,6 +117,15 @@ download page instead. Versions before 0.3.0 have no updater, so get 0.3.0 once 
 | Claude Code (Windows/Linux) | `~/.claude/.credentials.json` + `oauthAccount` in `~/.claude.json` | takes effect immediately, open sessions follow |
 | Claude Code (macOS) | Keychain item `Claude Code-credentials` + `oauthAccount` in `~/.claude.json` | same |
 | Codex CLI (all OSes) | `~/.codex/auth.json` | a running Codex keeps the old account until restarted |
+| Cursor | the `cursorAuth/*` rows of `<app data>/Cursor/User/globalStorage/state.vscdb` | Cursor reads them only when it starts: Piaz Switch asks, quits Cursor, switches and opens it again |
+| Antigravity | the `antigravityUnifiedStateSync.oauthToken` / `userStatus` rows of `<app data>/Antigravity/User/globalStorage/state.vscdb` | same as Cursor |
+
+`<app data>` is `%APPDATA%` on Windows and `~/Library/Application Support` on macOS.
+Piaz Switch closes an editor as closing its windows (Windows) or Quit (macOS) would,
+so save your work first: whether unsaved files are kept or asked about is the
+editor's own setting, and if it asks, answer, then switch again. A login is never
+written while the editor is open. Nothing else in its database is touched — not its
+settings, not its machine ids.
 
 A switch parks the live login under the account it belongs to — told apart by the
 account and organization (or ChatGPT workspace) it carries, not just its email —
@@ -128,6 +139,18 @@ parks the login it produced. Don't add accounts with Claude Code's `/login` or w
 `codex login`: both replace the login in use without parking it first, and
 `codex login` also revokes the login it replaces. Don't log out in the tools
 either: logging out ends the login Piaz Switch parked.
+
+The editors have no sign-in command, so:
+
+- **Cursor**: Piaz Switch opens Cursor's own sign-in page in your browser — the same
+  page and flow Cursor's command line uses — and receives the new login when you
+  approve it. The page approves whoever the browser is signed in to on cursor.com,
+  so use a private window for a different account. Cursor itself is not touched.
+- **Antigravity**: Piaz Switch opens Antigravity itself in a separate window with its
+  own, temporary data; you sign in to Google there, in Antigravity's own screen, and
+  Piaz Switch closes that window once the login is in and deletes its data (its
+  home folder is private too, so your `~/.gemini` isn't touched). Piaz Switch never
+  signs in to Google or calls Google on its own.
 
 ## Build from source
 
@@ -206,6 +229,12 @@ and Codex's from ChatGPT's (`/backend-api/wham/usage`), with the live token of t
 account in use or a parked account's vault copy. The app refreshes it on start, on
 **Refresh**, after a switch, and every 5 minutes.
 
+Cursor's comes from the endpoint Cursor's own usage panel reads
+(`DashboardService/GetCurrentPeriodUsage`): the share of the plan used this billing
+month. Antigravity's is not asked for at all: it is the per-model quota Antigravity
+itself last read and kept with the login, so a parked account shows its quota as of
+when it was last in use (a limit past its reset time shows as reset).
+
 Piaz Switch never refreshes a token to read usage: renewing rotates the refresh token,
 and two holders renewing one chain breaks it for both. A parked account whose access
 token has lapsed shows as expired until you switch to it and the tool renews it.
@@ -242,6 +271,12 @@ To refresh the shipped table: `cargo run -p pitstop-core --example update-prices
 
 - No Claude Desktop switching, no per-account browser windows, no code signing yet.
   Automatic switching and warm-up cover Claude Code only.
+- Cursor and Antigravity support is new and built on what their apps store, which
+  they don't document and may change. Antigravity 2.0's desktop app and its `agy`
+  command line keep their login elsewhere (the OS keyring) and aren't switched yet.
+  Command-line `piaz-switch` can't add an account for them (use the app), and switches
+  them only while they are closed. Antigravity is recognised by its program name, so
+  a 2.0 desktop app running under the same name counts as Antigravity being open.
 - Piaz Switch tells accounts apart by what the login files say. If another Claude Code
   process rewrites `oauthAccount` in `~/.claude.json` for a different login, the
   login in use can look unmanaged; Piaz Switch then leaves it alone rather than park it
@@ -279,17 +314,21 @@ Commons Clause](LICENSE):
 Because of that one condition it is not "open source" in the OSI sense. For any
 other arrangement, open an issue.
 
-Piaz Switch is an independent project, not affiliated with or endorsed by Anthropic
-or OpenAI. Claude and Claude Code are trademarks of Anthropic; Codex and ChatGPT are
-trademarks of OpenAI.
+Piaz Switch is an independent project, not affiliated with or endorsed by Anthropic,
+OpenAI, Anysphere or Google. Claude and Claude Code are trademarks of Anthropic;
+Codex and ChatGPT are trademarks of OpenAI; Cursor is a trademark of Anysphere;
+Antigravity and Gemini are trademarks of Google. Their marks appear in the app only to
+name their tools (Claude's spark and Cursor's cube from simple-icons, the Codex and
+Antigravity marks as redrawn by LobeHub Icons; see [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES.md)).
 
 ---
 
 ## Tiếng Việt
 
-**Piaz Switch** giúp bạn chuyển qua lại giữa nhiều tài khoản **Claude Code** và
-**Codex** chỉ bằng một cú bấm, không phải đăng xuất rồi đăng nhập lại, và xem mỗi
-tài khoản còn bao nhiêu hạn mức (5 giờ, tuần, theo model).
+**Piaz Switch** giúp bạn chuyển qua lại giữa nhiều tài khoản **Claude Code**,
+**Codex**, **Cursor** và **Antigravity** (Gemini của Google) chỉ bằng một cú bấm,
+không phải đăng xuất rồi đăng nhập lại, và xem mỗi tài khoản còn bao nhiêu hạn mức
+(5 giờ, tuần, tháng, theo model).
 
 **Tải về** tại trang [piaz-switch.vercel.app](https://piaz-switch.vercel.app) hoặc ở mục [Download](#download) phía trên:
 
@@ -324,6 +363,14 @@ nếu bạn không bấm. Bản 0.2.0 trở về trước chưa có tính năng 
 
 **Thêm tài khoản**: dùng nút **Add Account** trong app. Đừng dùng `/login` của
 Claude Code hay `codex login`, vì chúng thay luôn tài khoản đang dùng.
+
+- **Cursor**: app mở trang đăng nhập chính thức của Cursor trong trình duyệt. Nếu
+  trình duyệt đang đăng nhập Cursor bằng tài khoản khác, hãy dán link vào cửa sổ
+  ẩn danh.
+- **Antigravity**: app mở một cửa sổ Antigravity riêng để bạn đăng nhập Google ngay
+  trong Antigravity; xong thì cửa sổ đó tự đóng. Piaz Switch không tự gọi Google.
+- Khi chuyển tài khoản Cursor/Antigravity đang mở, app hỏi trước, đóng app đó, chuyển
+  rồi mở lại. Hãy lưu file trước khi chuyển.
 
 **Bảo mật**: không có máy chủ, không thu thập dữ liệu. Thông tin đăng nhập được mã
 hóa AES-256-GCM trên máy bạn, khóa nằm trong kho khóa của hệ điều hành.

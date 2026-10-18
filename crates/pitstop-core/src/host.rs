@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -20,6 +21,18 @@ pub trait Host {
     /// Pitstop's own secure storage (Credential Manager / Keychain via `keyring`).
     fn keystore_get(&self, name: &str) -> Result<Option<String>>;
     fn keystore_set(&self, name: &str, value: &str) -> Result<()>;
+    /// Where editors keep their data: `%APPDATA%` on Windows,
+    /// `~/Library/Application Support` on macOS, `~/.config` elsewhere.
+    fn app_data(&self) -> PathBuf;
+    /// `keys` from an editor's `state.vscdb` (see [`crate::vscdb`]); None
+    /// when the database isn't there.
+    fn vscdb_get(&self, db: &Path, keys: &[&str]) -> Result<Option<BTreeMap<String, String>>>;
+    /// Set `set` and remove `remove` in an editor's `state.vscdb`, all or
+    /// nothing, only while the editor is closed.
+    fn vscdb_put(&self, db: &Path, set: &BTreeMap<String, String>, remove: &[&str]) -> Result<()>;
+    /// Whether `provider`'s editor is open now, or might be: a check that
+    /// can't tell says it is. Never true for a command-line tool.
+    fn editor_running(&self, provider: crate::ProviderId) -> bool;
     /// Whether Claude Code keeps its token in the keychain rather than a
     /// file: on macOS it does.
     fn claude_token_in_keychain(&self) -> bool {
@@ -107,6 +120,30 @@ impl Host for RealHost {
             .clone()
             .or_else(dirs::home_dir)
             .expect("cannot determine home directory")
+    }
+
+    fn app_data(&self) -> PathBuf {
+        match &self.home_override {
+            // A sandboxed home keeps the editors' data inside it too.
+            Some(home) if cfg!(windows) => home.join("AppData").join("Roaming"),
+            Some(home) if cfg!(target_os = "macos") => {
+                home.join("Library").join("Application Support")
+            }
+            Some(home) => home.join(".config"),
+            None => dirs::config_dir().unwrap_or_else(|| self.home().join(".config")),
+        }
+    }
+
+    fn vscdb_get(&self, db: &Path, keys: &[&str]) -> Result<Option<BTreeMap<String, String>>> {
+        crate::vscdb::get(db, keys)
+    }
+
+    fn vscdb_put(&self, db: &Path, set: &BTreeMap<String, String>, remove: &[&str]) -> Result<()> {
+        crate::vscdb::put(db, set, remove)
+    }
+
+    fn editor_running(&self, provider: crate::ProviderId) -> bool {
+        crate::editor::app(provider).is_some_and(crate::editor::App::running)
     }
 
     fn read(&self, path: &Path) -> Result<Option<Vec<u8>>> {

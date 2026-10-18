@@ -650,6 +650,31 @@
     font: inherit;
   }
 
+  /* A tool's own mark: a monochrome one takes the text colour. */
+  .tool-logo {
+    display: inline-grid;
+    flex: none;
+    place-items: center;
+    width: 16px;
+    height: 16px;
+    color: var(--ink);
+  }
+
+  .tool-logo svg,
+  .tool-logo img {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+
+  .tool-logo.none::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--ink-3);
+  }
+
   /* At the head's far end, its text lined up with the panel's edge; the
      button's height doesn't push the panel down. */
   .group-head .group-add {
@@ -1534,6 +1559,61 @@
     overflow: hidden;
     text-overflow: ellipsis;
     transition: color var(--dur-base) var(--ease-out);
+  }
+
+  /* A choice with a tool's mark: mark and name centred together, the name
+     the part that gives way. */
+  .segmented button:has(.tool-logo) {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+  }
+
+  .segmented button .tool-logo {
+    width: 14px;
+    height: 14px;
+  }
+
+  .segmented button:disabled .tool-logo {
+    opacity: 0.45;
+  }
+
+  .seg-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Tiles: each tool's mark above its name, so four names fit unclipped. */
+  .segmented.tiles {
+    height: auto;
+    border-radius: var(--r-lg);
+  }
+
+  .segmented.tiles .seg-thumb {
+    border-radius: calc(var(--r-lg) - 2px);
+  }
+
+  .segmented.tiles button:has(.tool-logo) {
+    flex-direction: column;
+    gap: 5px;
+    height: auto;
+    padding: 10px 4px 8px;
+    border-radius: calc(var(--r-lg) - 2px);
+    font-size: 12px;
+    line-height: 15px;
+  }
+
+  .segmented.tiles button .tool-logo {
+    width: 22px;
+    height: 22px;
+  }
+
+  .segmented.tiles .seg-text {
+    max-width: 100%;
+    white-space: normal;
+    text-align: center;
   }
 
   .segmented button:hover:not(:disabled) {

@@ -16,6 +16,7 @@ use crate::model::UiError;
 const GIVE_UP_AFTER: Duration = Duration::from_secs(15 * 60);
 
 pub struct SignInJob {
+    provider: ProviderId,
     session: Arc<Mutex<Option<Session>>>,
     url: Arc<Mutex<Option<String>>>,
 }
@@ -50,6 +51,17 @@ fn gone() -> UiError {
 
 fn busy() -> UiError {
     UiError::new("signInRunning", "Another sign-in is already running.")
+}
+
+/// Whether a sign-in to `provider` is running: Antigravity's runs as a
+/// window of Antigravity itself, which closing Antigravity would close too.
+pub fn running_for(app: &AppHandle, provider: ProviderId) -> bool {
+    let state = app.state::<AppState>();
+    let job = state.sign_in.lock();
+    job.is_ok_and(|job| {
+        job.as_ref()
+            .is_some_and(|job| job.provider == provider && job.running())
+    })
 }
 
 /// Stop the sign-in that is running, if any; its watcher reports it cancelled.
@@ -122,6 +134,7 @@ pub fn start(
         return Err(busy());
     }
     let job = SignInJob {
+        provider,
         session: Arc::new(Mutex::new(Some(session))),
         url: Arc::new(Mutex::new(None)),
     };

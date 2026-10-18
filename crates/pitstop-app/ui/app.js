@@ -226,7 +226,8 @@ function copyButton(text, label, key) {
 /** `5h` as a row label; with `long`, as a sentence says it (`5-hour`). */
 function windowName(label, long) {
   const [head, ...rest] = label.split(" ");
-  const name = head === "5h" ? t(long ? "window5hLong" : "window5h") : head === "week" ? t(long ? "windowWeekLong" : "windowWeek") : head;
+  const names = { "5h": "window5h", week: "windowWeek", month: "windowMonth" };
+  const name = names[head] ? t(names[head] + (long ? "Long" : "")) : head;
   return [name, ...rest].join(" ");
 }
 
@@ -516,7 +517,13 @@ function renderAccounts(moves) {
         h(
           "div",
           { class: "group-head" },
-          h("h2", { class: "group-title" }, h("span", { text: tool.name }), h("span", { class: "count", "aria-hidden": "true", text: String(tool.accounts.length) })),
+          h(
+            "h2",
+            { class: "group-title" },
+            toolLogo(tool.id),
+            h("span", { text: tool.name }),
+            h("span", { class: "count", "aria-hidden": "true", text: String(tool.accounts.length) }),
+          ),
           groupAdd(tool),
         ),
         h(
@@ -935,7 +942,11 @@ function closeMenu() {
 
 // ---------- changes ----------
 
-async function useAccount(tool, account, force) {
+/** Editors (Cursor, Antigravity) read a login only when they start. */
+const EDITORS = ["cursor", "antigravity"];
+const isEditor = (id) => EDITORS.includes(id);
+
+async function useAccount(tool, account, force, restart) {
   if (!tool || !account) return;
   const key = rowKey(tool.id, account.name);
   if (switching.has(key)) return;
@@ -949,8 +960,10 @@ async function useAccount(tool, account, force) {
   renderPane();
   try {
     // The app asks first when the tool is signed in to a login nobody owns.
-    const result = await invoke("use_account", { provider: tool.id, name: account.name, replaceUnmanaged: Boolean(force) });
+    // And before closing an editor that is open, to switch it.
+    const result = await invoke("use_account", { provider: tool.id, name: account.name, replaceUnmanaged: Boolean(force), restartEditor: Boolean(restart) });
     if (result.needsConfirmation) openConfirmSwitch(tool, account, result.replacedLabel);
+    else if (result.needsRestart) openConfirmRestart(tool, account, Boolean(force));
     else if (result.switched) noticeSwitched(result);
   } catch (error) {
     openAlert(t("couldntSwitch", { name: account.name }), errorText(error));
@@ -963,7 +976,13 @@ async function useAccount(tool, account, force) {
 function noticeSwitched(result) {
   const tool = toolOf(result.provider);
   const toolName = tool ? tool.name : result.provider;
-  const lines = [result.provider === "codex" ? t("codexRestart") : t("claudeFollows")];
+  const lines = [
+    isEditor(result.provider)
+      ? t(result.restarted ? "editorReopened" : "editorNextOpen", { tool: toolName })
+      : result.provider === "codex"
+        ? t("codexRestart")
+        : t("claudeFollows"),
+  ];
   if (result.replaced) lines.push(t("replacedNote", { tool: toolName, email: result.replacedLabel || "?" }));
   pushNotice({ id: "switched", kind: "success", icon: "check", title: t("switchedTitle", { tool: toolName, name: result.name }), lines });
 }
@@ -1159,13 +1178,15 @@ function sheetHead(title, message, badge) {
 }
 
 /** A pill track with a thumb that slides to the chosen option. `choose`
- * gets the option's id and whether the keyboard picked it. */
-function segmented(options, chosen, labelId, choose) {
+ * gets the option's id and whether the keyboard picked it.
+ * `variant` "tiles" stacks each choice's mark over its name, for choices
+ * too many to fit side by side as words. */
+function segmented(options, chosen, labelId, choose, variant) {
   const index = Math.max(0, options.findIndex((o) => o.id === chosen));
   const group = h(
     "div",
     {
-      class: "segmented",
+      class: "segmented" + (variant ? ` ${variant}` : ""),
       role: "radiogroup",
       "aria-labelledby": labelId,
       "data-index": String(index),
@@ -1256,17 +1277,17 @@ const DIALOGS = {
             d.refused ? h("p", { class: "hint invalid", text: t("codeRefused", { tool: toolName }) }) : null,
           ]
         : null;
-      const message = d.again
-        ? t("signingInAgain", { email: d.email || d.name })
-        : d.provider === "codex"
-          ? t("signingInCodex")
-          : t("signingInClaude");
+      const how = { codex: "signingInCodex", cursor: "signingInCursor", antigravity: "signingInAntigravity" }[d.provider] || "signingInClaude";
+      const message = d.again && !isEditor(d.provider) ? t("signingInAgain", { email: d.email || d.name }) : t(how, { email: d.email || d.name });
       return [
         sheetHead(t("signingInTitle", { tool: toolName }), message),
         h(
           "div",
           { class: "form" },
-          field(
+          // Antigravity signs in in its own window: there is no page to open.
+          d.provider === "antigravity"
+            ? null
+            : field(
             t("signInPage"),
             h(
               "div",
@@ -1314,7 +1335,9 @@ const DIALOGS = {
     return [
       sheetHead(
         d.again ? t("signInAgainTitle", { name: d.name }) : choice ? t("addTitle") : t("addTitleFor", { tool: toolName }),
-        d.again ? t("signInAgainMessage", { email: d.email || d.name }) : t("addMessage"),
+        d.again
+          ? t(d.provider === "antigravity" ? "signInAgainAntigravity" : "signInAgainMessage", { email: d.email || d.name })
+          : t({ cursor: "addMessageCursor", antigravity: "addMessageAntigravity" }[d.provider] || "addMessage"),
       ),
       h(
         "div",
@@ -1326,18 +1349,21 @@ const DIALOGS = {
                 ? field(
                     t("tool"),
                     segmented(
-                      offered.map((x) => ({ id: x.id, label: x.name, disabled: missing.includes(x) })),
+                      offered.map((x) => ({ id: x.id, label: [toolLogo(x.id), h("span", { class: "seg-text", text: x.name })], disabled: missing.includes(x) })),
                       d.provider,
                       "tool-label",
                       choose,
+                      "tiles",
                     ),
                   )
                 : null,
               field(t("name"), nameInput(d, t("namePrompt"))),
               nameBroken ? nameHint(d) : null,
             ],
-        missing.map((x) => h("p", { class: "footnote", text: t("toolMissing", { tool: x.name, program: x.id === "codex" ? "codex" : "claude" }) })),
-        d.again ? null : h("p", { class: "footnote", text: t("addWarning") }),
+        missing.map((x) =>
+          h("p", { class: "footnote", text: isEditor(x.id) ? t("appMissing", { tool: x.name }) : t("toolMissing", { tool: x.name, program: x.id === "codex" ? "codex" : "claude" }) }),
+        ),
+        d.again ? null : h("p", { class: "footnote", text: isEditor(d.provider) ? t("addWarningEditor", { tool: toolName }) : t("addWarning") }),
       ),
       failureBox(d.again ? t("couldntSignIn", { name: d.name }) : t("couldntAdd", { name: d.name.trim() }), d.error),
       buttons(
@@ -1465,6 +1491,31 @@ const DIALOGS = {
     ];
   },
 
+  restart() {
+    const d = dialog;
+    const tool = toolOf(d.provider);
+    const account = tool && tool.accounts.find((a) => a.name === d.name);
+    const toolName = tool ? tool.name : d.provider;
+    return [
+      sheetHead(t("confirmRestartTitle", { tool: toolName }), t("confirmRestartMessage", { tool: toolName, name: d.name }), { tone: "warning", icon: "swap" }),
+      buttons(
+        h("span", { class: "spacer" }),
+        keyed(button(t("cancel"), closeDialog), "cancel"),
+        keyed(
+          button(
+            t("closeAndSwitch", { tool: toolName }),
+            () => {
+              closeDialog();
+              useAccount(tool, account, d.force, true);
+            },
+            "primary",
+          ),
+          "primary",
+        ),
+      ),
+    ];
+  },
+
   alert() {
     const d = dialog;
     return [sheetHead(d.title, d.message, { tone: "error", icon: "error" }), buttons(h("span", { class: "spacer" }), keyed(button(t("ok"), closeDialog, "primary"), "primary"))];
@@ -1510,6 +1561,10 @@ function openRename(tool, account) {
 
 function openForget(tool, account) {
   openDialog({ type: "forget", provider: tool.id, name: account.name, inUse: account.inUse, error: null, busy: false });
+}
+
+function openConfirmRestart(tool, account, force) {
+  openDialog({ type: "restart", provider: tool.id, name: account.name, force });
 }
 
 function openConfirmSwitch(tool, account, label) {
@@ -1596,6 +1651,10 @@ function onOpenDialog(request) {
     const tool = toolOf(request.provider);
     const account = tool && tool.accounts.find((a) => a.name === request.name);
     if (tool && account) openConfirmSwitch(tool, account, request.label);
+  } else if (request.kind === "confirm-restart") {
+    const tool = toolOf(request.provider);
+    const account = tool && tool.accounts.find((a) => a.name === request.name);
+    if (tool && account) openConfirmRestart(tool, account, false);
   }
 }
 

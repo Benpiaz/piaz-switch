@@ -1,7 +1,11 @@
 //! Best-effort usage, read the way the tools themselves read it:
 //! - Claude Code: `GET https://api.anthropic.com/api/oauth/usage`, as `/usage` does;
 //! - Codex: `GET https://chatgpt.com/backend-api/wham/usage` with the account's
-//!   `ChatGPT-Account-ID`, as the Codex CLI sends it.
+//!   `ChatGPT-Account-ID`, as the Codex CLI sends it;
+//! - Cursor: `POST https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage`,
+//!   as the editor's own usage panel does;
+//! - Antigravity: not asked at all. The quota is the one Antigravity itself
+//!   last read and kept with the login (see `provider::antigravity::quota`).
 //!
 //! Pitstop never refreshes a token to read usage. Refreshing rotates the
 //! refresh token, and the live login is the tool's to renew — two holders
@@ -14,6 +18,8 @@ use serde_json::Value;
 
 pub const USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
 pub const CODEX_USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
+pub const CURSOR_USAGE_URL: &str =
+    "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage";
 
 /// One rate-limit window, e.g. the five-hour session or the weekly limit.
 #[derive(Debug, Clone, PartialEq)]
@@ -67,6 +73,8 @@ pub trait UsageApi: Sync {
     fn claude(&self, access_token: &str) -> Result<Value, FetchError>;
     /// OpenAI's answer for a Codex access token and its ChatGPT account.
     fn codex(&self, access_token: &str, account_id: &str) -> Result<Value, FetchError>;
+    /// Cursor's answer for its access token: this billing period's use.
+    fn cursor(&self, access_token: &str) -> Result<Value, FetchError>;
 }
 
 /// Anthropic and OpenAI over the network.
@@ -147,6 +155,18 @@ impl UsageApi for Http {
                 .call()
         });
         answer(response, "OpenAI")
+    }
+
+    fn cursor(&self, access_token: &str) -> Result<Value, FetchError> {
+        let response = call_twice(|| {
+            self.agent
+                .post(CURSOR_USAGE_URL)
+                .header("Authorization", format!("Bearer {access_token}"))
+                .header("Connect-Protocol-Version", "1")
+                .header("Content-Type", "application/json")
+                .send("{}")
+        });
+        answer(response, "Cursor")
     }
 }
 
@@ -284,6 +304,45 @@ pub(crate) fn claude_report(result: Result<Value, FetchError>) -> UsageReport {
 
 pub(crate) fn codex_report(result: Result<Value, FetchError>) -> UsageReport {
     report(result, parse_codex)
+}
+
+pub(crate) fn cursor_report(result: Result<Value, FetchError>) -> UsageReport {
+    report(result, parse_cursor)
+}
+
+/// A number sent as one, or as a string of one (Cursor sends both).
+fn number(value: &Value) -> Option<f64> {
+    value
+        .as_f64()
+        .or_else(|| value.as_str()?.trim().parse().ok())
+        .filter(|n: &f64| n.is_finite())
+}
+
+/// This billing period's share of the plan used, the period running from
+/// `billingCycleStart` to `billingCycleEnd` (epoch milliseconds).
+pub fn parse_cursor(body: &Value) -> Usage {
+    let plan = &body["planUsage"];
+    let percent = number(&plan["totalPercentUsed"]).or_else(|| {
+        let limit = number(&plan["limit"]).filter(|l| *l > 0.0)?;
+        Some(number(&plan["totalSpend"])? / limit * 100.0)
+    });
+    let Some(percent) = percent.filter(|p| *p >= 0.0) else {
+        return Usage::default();
+    };
+    let secs = |key: &str| {
+        number(&body[key])
+            .map(|ms| (ms / 1000.0) as i64)
+            .filter(|s| *s > 0)
+    };
+    let (start, end) = (secs("billingCycleStart"), secs("billingCycleEnd"));
+    Usage {
+        windows: vec![Window {
+            label: "month".into(),
+            percent,
+            resets_at: end,
+            length_secs: start.zip(end).map(|(s, e)| e - s).filter(|l| *l > 0),
+        }],
+    }
 }
 
 fn report(result: Result<Value, FetchError>, parse: fn(&Value) -> Usage) -> UsageReport {
@@ -435,6 +494,33 @@ fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cursor_reads_as_one_window_over_its_billing_period() {
+        let usage = parse_cursor(&serde_json::json!({
+            "billingCycleStart": "1790000000000",
+            "billingCycleEnd": "1792592000000",
+            "planUsage": {"totalPercentUsed": 37.5, "limit": 2000},
+            "enabled": true
+        }));
+        assert_eq!(
+            usage.windows,
+            [Window {
+                label: "month".into(),
+                percent: 37.5,
+                resets_at: Some(1_792_592_000),
+                length_secs: Some(2_592_000),
+            }]
+        );
+        // only spend and a limit, in cents
+        let spend = parse_cursor(&serde_json::json!({
+            "planUsage": {"totalSpend": "500", "limit": "2000"}
+        }));
+        assert_eq!(spend.windows[0].percent, 25.0);
+        assert!(parse_cursor(&serde_json::json!({"enabled": false}))
+            .windows
+            .is_empty());
+    }
     use serde_json::json;
 
     /// The usage endpoint's answer as Claude Code receives it (shape as of 2026-09).

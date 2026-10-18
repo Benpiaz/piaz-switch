@@ -3,7 +3,8 @@
 //! keychain, the network or a lock runs off the UI thread.
 
 use pitstop_core::engine::{RemoveOutcome, SwitchOutcome};
-use pitstop_core::ProviderId;
+use pitstop_core::live::Live;
+use pitstop_core::{editor, ProviderId};
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_autostart::ManagerExt;
@@ -61,16 +62,27 @@ pub struct Switched {
     /// was replaced, not parked.
     pub replaced: bool,
     pub replaced_label: Option<String>,
+    /// Nothing happened: the tool is an editor that is open, and it reads a
+    /// new login only when it starts. Ask, then call again with
+    /// `restart_editor`.
+    pub needs_restart: bool,
+    /// The editor was closed for the switch and opened again.
+    pub restarted: bool,
 }
+
+/// How long an editor is given to quit when asked.
+const EDITOR_QUIT_WAIT: std::time::Duration = std::time::Duration::from_secs(25);
 
 /// Switch `pid` to `name`. Unless `replace_unmanaged`, a login no enrolled
 /// account owns stops the switch, decided on the same read of the login the
-/// switch would park.
+/// switch would park. An editor that is open is closed for the switch and
+/// opened again, but only with `restart_editor`; otherwise the answer asks.
 pub fn switch(
     app: &AppHandle,
     pid: ProviderId,
     name: &str,
     replace_unmanaged: bool,
+    restart_editor: bool,
 ) -> Answer<Switched> {
     if app::warming(app, pid, name) {
         return Err(UiError {
@@ -79,18 +91,6 @@ pub fn switch(
             name: Some(name.to_owned()),
         });
     }
-    let state = app.state::<AppState>();
-    let outcome = {
-        let _op = state.ops.lock();
-        let engine = app::engine();
-        if replace_unmanaged {
-            engine.switch(name, Some(pid))
-        } else {
-            engine.switch_keeping_unmanaged(name, Some(pid))
-        }
-    };
-    app::refresh(app);
-    let outcome = outcome.map_err(|e| UiError::from(&e))?;
     let unchanged = |needs_confirmation, replaced_label| Switched {
         switched: false,
         needs_confirmation,
@@ -98,7 +98,59 @@ pub fn switch(
         name: name.to_owned(),
         replaced: false,
         replaced_label,
+        needs_restart: false,
+        restarted: false,
     };
+    let state = app.state::<AppState>();
+    let mut restarted = false;
+    if let Some(editor) = editor::app(pid) {
+        // What can be answered without closing it is answered first.
+        match app::engine().live(pid) {
+            Ok(Live::Account(live)) if live == name => return Ok(unchanged(false, None)),
+            Ok(Live::Unmanaged { label, .. }) if !replace_unmanaged => {
+                return Ok(unchanged(true, label))
+            }
+            _ => {}
+        }
+        if crate::signin::running_for(app, pid) {
+            return Err(UiError::new(
+                "signInRunning",
+                "Another sign-in is already running.",
+            ));
+        }
+        if editor.running() {
+            if !restart_editor {
+                return Ok(Switched {
+                    needs_restart: true,
+                    ..unchanged(false, None)
+                });
+            }
+            // Closed without holding the lock: it can take a while. Should it
+            // open again meanwhile, the switch below refuses to write under it.
+            editor
+                .quit(EDITOR_QUIT_WAIT)
+                .map_err(|e| UiError::from(&e))?;
+            restarted = true;
+        }
+    }
+    let outcome = {
+        let _op = state.ops.lock();
+        let engine = app::engine();
+        let outcome = if replace_unmanaged {
+            engine.switch(name, Some(pid))
+        } else {
+            engine.switch_keeping_unmanaged(name, Some(pid))
+        };
+        // Back as it was, switched or not.
+        if restarted {
+            if let Some(editor) = editor::app(pid) {
+                let _ = editor.open(&app::real_home());
+            }
+        }
+        outcome
+    };
+    app::refresh(app);
+    let outcome = outcome.map_err(|e| UiError::from(&e))?;
     Ok(match outcome {
         SwitchOutcome::AlreadyActive => unchanged(false, None),
         SwitchOutcome::WouldReplace(login) => unchanged(true, login.label),
@@ -115,6 +167,8 @@ pub fn switch(
                 name,
                 replaced: replaced.is_some(),
                 replaced_label: replaced.and_then(|r| r.label),
+                needs_restart: false,
+                restarted,
             }
         }
     })
@@ -126,9 +180,19 @@ pub async fn use_account(
     provider: String,
     name: String,
     replace_unmanaged: Option<bool>,
+    restart_editor: Option<bool>,
 ) -> Answer<Switched> {
     let pid = self::provider(&provider)?;
-    blocking(move || switch(&app, pid, &name, replace_unmanaged.unwrap_or(false))).await
+    blocking(move || {
+        switch(
+            &app,
+            pid,
+            &name,
+            replace_unmanaged.unwrap_or(false),
+            restart_editor.unwrap_or(false),
+        )
+    })
+    .await
 }
 
 /// Enroll the login the tool is signed in to, under `name`.

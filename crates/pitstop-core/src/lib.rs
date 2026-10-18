@@ -1,8 +1,11 @@
+pub mod cursor_login;
+pub mod editor;
 pub mod engine;
 pub mod error;
 pub mod host;
 pub mod ledger;
 pub mod live;
+pub(crate) mod pb;
 pub mod pricing;
 pub mod provider;
 pub mod signin;
@@ -10,6 +13,7 @@ pub mod state;
 pub mod testing;
 pub mod usage;
 pub mod vault;
+pub mod vscdb;
 
 pub use engine::Engine;
 pub use error::Error;

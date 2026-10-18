@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+### Added
+- Cursor and Antigravity (Google's editor for Gemini) accounts, beside Claude Code
+  and Codex: add, switch, rename, forget, and see each account's limits.
+  - Adding a Cursor account opens Cursor's own sign-in page in the browser, as
+    Cursor's command line does; adding an Antigravity account opens Antigravity
+    itself in a separate window to sign in to Google there. The editor in use is
+    not touched.
+  - Both read their account only when they start, so switching one that is open
+    asks first, closes it, switches and opens it again (save your work first). A
+    login is never written while the editor is open.
+  - Cursor shows the share of the plan used this billing month; Antigravity the
+    per-model quota it last read itself. Piaz Switch never calls Google.
+- Each tool's mark (Claude's spark, the Codex, Cursor and Antigravity marks) beside
+  its name in the account list, the Add Account dialog and the Usage pane. The
+  dialog picks a tool from tiles.
+
 ## [0.4.1] - 2026-10-18
 
 ### Changed

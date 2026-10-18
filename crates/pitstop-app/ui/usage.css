@@ -203,17 +203,10 @@
   flex: none;
 }
 
-.tool-mark svg {
+/* A tool's mark keeps its own colours; its series colour is the dot's. */
+.tool-mark .tool-logo {
   width: 16px;
   height: 16px;
-}
-
-.tool-mark.claude-code {
-  color: var(--tool-claude-code);
-}
-
-.tool-mark.codex {
-  color: var(--tool-codex);
 }
 
 .tool-name {

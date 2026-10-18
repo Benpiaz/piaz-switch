@@ -13,6 +13,10 @@ pub struct FakeHost {
     keychain: RefCell<BTreeMap<String, String>>,
     keystore: RefCell<BTreeMap<String, String>>,
     fail_writes: RefCell<BTreeMap<PathBuf, u32>>,
+    /// Editors' `state.vscdb` tables, by database path.
+    vscdbs: RefCell<BTreeMap<PathBuf, BTreeMap<String, String>>>,
+    /// Editors open now.
+    open_editors: RefCell<Vec<crate::ProviderId>>,
     /// Paths that differ only in case are one file, as on Windows and macOS.
     fold_case: bool,
 }
@@ -52,6 +56,29 @@ impl FakeHost {
         self.fail_writes.borrow_mut().insert(path.into(), times);
     }
 
+    /// An editor's database holding `rows`.
+    pub fn put_vscdb(&self, db: impl Into<PathBuf>, rows: &[(&str, &str)]) {
+        let rows = rows
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect();
+        self.vscdbs.borrow_mut().insert(db.into(), rows);
+    }
+
+    /// Open or close `provider`'s editor.
+    pub fn set_editor_open(&self, provider: crate::ProviderId, open: bool) {
+        let mut editors = self.open_editors.borrow_mut();
+        editors.retain(|p| *p != provider);
+        if open {
+            editors.push(provider);
+        }
+    }
+
+    /// Everything an editor's database holds.
+    pub fn vscdb(&self, db: &Path) -> Option<BTreeMap<String, String>> {
+        self.vscdbs.borrow().get(db).cloned()
+    }
+
     pub fn delete_keystore_entry(&self, name: &str) {
         self.keystore.borrow_mut().remove(name);
     }
@@ -68,6 +95,35 @@ impl Host for FakeHost {
 
     fn read(&self, path: &Path) -> Result<Option<Vec<u8>>> {
         Ok(self.files.borrow().get(&self.key(path)).cloned())
+    }
+
+    fn app_data(&self) -> PathBuf {
+        PathBuf::from("/fake-home/app-data")
+    }
+
+    fn vscdb_get(&self, db: &Path, keys: &[&str]) -> Result<Option<BTreeMap<String, String>>> {
+        Ok(self.vscdbs.borrow().get(db).map(|rows| {
+            rows.iter()
+                .filter(|(k, _)| keys.contains(&k.as_str()))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect()
+        }))
+    }
+
+    fn editor_running(&self, provider: crate::ProviderId) -> bool {
+        self.open_editors.borrow().contains(&provider)
+    }
+
+    fn vscdb_put(&self, db: &Path, set: &BTreeMap<String, String>, remove: &[&str]) -> Result<()> {
+        let mut dbs = self.vscdbs.borrow_mut();
+        let rows = dbs
+            .get_mut(db)
+            .ok_or_else(|| Error::InvalidData(format!("{} is not there", db.display())))?;
+        for key in remove {
+            rows.remove(*key);
+        }
+        rows.extend(set.iter().map(|(k, v)| (k.clone(), v.clone())));
+        Ok(())
     }
 
     fn write_atomic(&self, path: &Path, bytes: &[u8]) -> Result<()> {
