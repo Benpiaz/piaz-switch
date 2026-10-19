@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.5.1] - 2026-10-19
+
+### Fixed
+- Adding a Codex account, and **Sign in again**, work on Windows with only the
+  Codex app from the Microsoft Store: Piaz Switch now signs in with the `codex`
+  the app carries inside it, where before it said Codex wasn't on the machine
+  (#3). A `codex` command of its own, if there is one, still comes first. On
+  macOS it also looks inside `Codex.app`.
+
 ## [0.5.0] - 2026-10-18
 
 ### Added
