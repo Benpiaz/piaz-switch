@@ -133,8 +133,53 @@ pub fn find_in(name: &str, dirs: &[PathBuf]) -> Option<PathBuf> {
 pub fn find_program(provider: ProviderId, home: &Path) -> Option<PathBuf> {
     match editor::app(provider) {
         Some(app) => app.find(home),
-        None => find_in(program_name(provider), &search_path(home)),
+        None => command_in(provider, &search_path(home), home),
     }
+}
+
+/// A command tool's program: on `search` (see [`search_path`]), else the one
+/// a desktop app carries. The Add dialog and the sign-in both look this way,
+/// so a tool shown as there can sign in.
+fn command_in(provider: ProviderId, search: &[PathBuf], home: &Path) -> Option<PathBuf> {
+    find_in(program_name(provider), search).or_else(|| carried_by_app(provider, home))
+}
+
+/// The Codex app's package family in the Microsoft Store.
+#[cfg(windows)]
+const CODEX_PACKAGE: &str = "OpenAI.Codex_2p2nqsd0c76g0";
+
+/// The command a desktop app carries, for a machine with the app but no
+/// command of its own: the Codex app runs its own `codex`, which signs in
+/// as the command line does. A `codex` on `PATH` comes first.
+fn carried_by_app(provider: ProviderId, home: &Path) -> Option<PathBuf> {
+    if provider != ProviderId::Codex {
+        return None;
+    }
+    codex_app_programs(home).into_iter().find(|p| p.is_file())
+}
+
+/// Where the Codex app keeps its `codex`: on Windows in its Store package,
+/// `…\WindowsApps\OpenAI.Codex_…\app\resources\codex.exe` (seen in 26.1013);
+/// on macOS, by the same layout, in the app bundle's resources (not seen).
+#[cfg(windows)]
+fn codex_app_programs(_home: &Path) -> Vec<PathBuf> {
+    crate::store::package_roots(CODEX_PACKAGE)
+        .into_iter()
+        .map(|root| root.join("app").join("resources").join("codex.exe"))
+        .collect()
+}
+
+#[cfg(target_os = "macos")]
+fn codex_app_programs(home: &Path) -> Vec<PathBuf> {
+    [PathBuf::from("/Applications"), home.join("Applications")]
+        .into_iter()
+        .map(|apps| apps.join("Codex.app/Contents/Resources/codex"))
+        .collect()
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+fn codex_app_programs(_home: &Path) -> Vec<PathBuf> {
+    Vec::new()
 }
 
 /// The sign-in command for `provider`, with `dir` as the tool's home and
@@ -402,7 +447,7 @@ impl Session {
 
     fn by_command(provider: ProviderId, home: &Path) -> Result<Session> {
         let search = search_path(home);
-        let program = find_in(program_name(provider), &search)
+        let program = command_in(provider, &search, home)
             .ok_or_else(|| Error::ToolNotFound(program_name(provider).into()))?;
         let dir = PrivateDir::create(provider)?;
         let mut cmd = command(provider, &program, dir.path(), &search);
@@ -643,7 +688,7 @@ pub fn run_in_terminal(provider: ProviderId, home: &Path) -> Result<PrivateDir> 
         )));
     }
     let search = search_path(home);
-    let program = find_in(program_name(provider), &search)
+    let program = command_in(provider, &search, home)
         .ok_or_else(|| Error::ToolNotFound(program_name(provider).into()))?;
     let dir = PrivateDir::create(provider)?;
     let status = command(provider, &program, dir.path(), &search)
@@ -805,6 +850,39 @@ mod tests {
         let dirs = [a.path().to_path_buf(), b.path().to_path_buf()];
         assert_eq!(find_in("claude", &dirs), Some(b.path().join(file)));
         assert_eq!(find_in("codex", &dirs), None);
+    }
+
+    #[test]
+    fn only_codex_is_looked_for_inside_an_app() {
+        let home = Path::new("/nowhere");
+        assert_eq!(carried_by_app(ProviderId::ClaudeCode, home), None);
+        assert_eq!(carried_by_app(ProviderId::Cursor, home), None);
+    }
+
+    #[test]
+    fn a_command_on_the_search_path_comes_before_an_app_s() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = if cfg!(windows) { "codex.cmd" } else { "codex" };
+        std::fs::write(dir.path().join(file), "").unwrap();
+        let search = [dir.path().to_path_buf()];
+        let nowhere = Path::new("/nowhere");
+        assert_eq!(
+            command_in(ProviderId::Codex, &search, nowhere),
+            Some(dir.path().join(file))
+        );
+        assert_eq!(command_in(ProviderId::ClaudeCode, &search, nowhere), None);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_codex_app_keeps_codex_in_its_bundle() {
+        assert_eq!(
+            codex_app_programs(Path::new("/Users/u")),
+            [
+                PathBuf::from("/Applications/Codex.app/Contents/Resources/codex"),
+                PathBuf::from("/Users/u/Applications/Codex.app/Contents/Resources/codex"),
+            ]
+        );
     }
 
     #[cfg(windows)]

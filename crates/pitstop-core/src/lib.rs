@@ -10,6 +10,8 @@ pub mod pricing;
 pub mod provider;
 pub mod signin;
 pub mod state;
+#[cfg(windows)]
+pub mod store;
 pub mod testing;
 pub mod usage;
 pub mod vault;
