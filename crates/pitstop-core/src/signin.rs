@@ -26,7 +26,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use crate::cursor_login::{self, Polled};
 use crate::editor;
@@ -138,48 +138,219 @@ pub fn find_program(provider: ProviderId, home: &Path) -> Option<PathBuf> {
 }
 
 /// A command tool's program: on `search` (see [`search_path`]), else the one
-/// a desktop app carries. The Add dialog and the sign-in both look this way,
-/// so a tool shown as there can sign in.
+/// a desktop app or an editor extension carries. The Add dialog and the
+/// sign-in both look this way, so a tool shown as there can sign in.
 fn command_in(provider: ProviderId, search: &[PathBuf], home: &Path) -> Option<PathBuf> {
-    find_in(program_name(provider), search).or_else(|| carried_by_app(provider, home))
+    find_in(program_name(provider), search).or_else(|| carried(provider, home))
 }
 
 /// The Codex app's package family in the Microsoft Store.
 #[cfg(windows)]
 const CODEX_PACKAGE: &str = "OpenAI.Codex_2p2nqsd0c76g0";
 
-/// The command a desktop app carries, for a machine with the app but no
-/// command of its own: the Codex app runs its own `codex`, which signs in
-/// as the command line does. A `codex` on `PATH` comes first.
-fn carried_by_app(provider: ProviderId, home: &Path) -> Option<PathBuf> {
-    if provider != ProviderId::Codex {
-        return None;
-    }
-    codex_app_programs(home).into_iter().find(|p| p.is_file())
+/// The command something else carries, for a machine with that but no
+/// command of its own: the Codex app runs its own `codex`, the Claude app and
+/// the Claude Code extension of VS Code and its kin their own `claude`, and
+/// each signs in as the command line does. A command on `PATH` comes first.
+fn carried(provider: ProviderId, home: &Path) -> Option<PathBuf> {
+    let programs = match provider {
+        ProviderId::ClaudeCode => claude_carried(&claude_app_folders(home), home),
+        ProviderId::Codex => codex_app_programs(home),
+        ProviderId::Cursor | ProviderId::Antigravity => return None,
+    };
+    newest_runnable(programs)
 }
 
-/// Where the Codex app keeps its `codex`: on Windows in its Store package,
-/// `…\WindowsApps\OpenAI.Codex_…\app\resources\codex.exe` (seen in 26.1013);
-/// on macOS, by the same layout, in the app bundle's resources (not seen).
+/// Of `programs`, the one written last that this process may run; of two
+/// written at the same time, the first (the Codex app's copy keeps the time
+/// of the file in its package, which is listed first).
+fn newest_runnable(programs: Vec<PathBuf>) -> Option<PathBuf> {
+    let mut newest: Option<(SystemTime, PathBuf)> = None;
+    for program in programs {
+        let Some(written) = runnable(&program) else {
+            continue;
+        };
+        if newest.as_ref().is_none_or(|(at, _)| written > *at) {
+            newest = Some((written, program));
+        }
+    }
+    newest.map(|(_, program)| program)
+}
+
+/// When `program` was written, if it is a file this process may run. On some
+/// machines Windows lets only the Codex app into its own package: the `codex`
+/// in there shows, but starting it is "Access is denied".
+fn runnable(program: &Path) -> Option<SystemTime> {
+    let mut options = std::fs::OpenOptions::new();
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // What starting it takes: FILE_GENERIC_READ | FILE_EXECUTE.
+        options.access_mode(0x0012_00a9);
+    }
+    #[cfg(not(windows))]
+    options.read(true);
+    let meta = options
+        .open(program)
+        .and_then(|file| file.metadata())
+        .ok()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if meta.permissions().mode() & 0o111 == 0 {
+            return None;
+        }
+    }
+    meta.is_file()
+        .then(|| meta.modified().unwrap_or(SystemTime::UNIX_EPOCH))
+}
+
+/// The directories in `dir`; none when it can't be read.
+fn subdirs(dir: &Path) -> Vec<PathBuf> {
+    std::fs::read_dir(dir)
+        .map(|entries| {
+            entries
+                .flatten()
+                .map(|entry| entry.path())
+                .filter(|path| path.is_dir())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Where the Codex app keeps its `codex`. On Windows, in its Store package,
+/// `…\WindowsApps\OpenAI.Codex_…\app\resources\codex.exe` (seen in 26.1013),
+/// and in the copies the app makes to run, which run where the package
+/// doesn't (see [`codex_app_copies`]).
 #[cfg(windows)]
 fn codex_app_programs(_home: &Path) -> Vec<PathBuf> {
-    crate::store::package_roots(CODEX_PACKAGE)
+    let mut programs: Vec<PathBuf> = crate::store::package_roots(CODEX_PACKAGE)
         .into_iter()
         .map(|root| root.join("app").join("resources").join("codex.exe"))
-        .collect()
+        .collect();
+    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+        let bin = PathBuf::from(local)
+            .join("OpenAI")
+            .join("Codex")
+            .join("bin");
+        programs.extend(codex_app_copies(&bin));
+    }
+    programs
 }
 
+/// The copies of its `codex` the Codex app made in `bin`
+/// (`%LOCALAPPDATA%\OpenAI\Codex\bin`): one per build,
+/// `bin\<build>\codex.exe` (seen in 26.1016), and `bin\codex.exe` from older
+/// apps.
+#[cfg(windows)]
+fn codex_app_copies(bin: &Path) -> Vec<PathBuf> {
+    let mut copies: Vec<PathBuf> = subdirs(bin)
+        .into_iter()
+        .map(|build| build.join("codex.exe"))
+        .collect();
+    copies.push(bin.join("codex.exe"));
+    copies
+}
+
+/// On macOS, in the app bundle, where its Windows build says the Mac one
+/// runs it from (not seen on a Mac); the Windows app goes by ChatGPT since
+/// 26.1016, so the Mac one may too. Then where Piaz Switch 0.5.1 looked.
 #[cfg(target_os = "macos")]
 fn codex_app_programs(home: &Path) -> Vec<PathBuf> {
-    [PathBuf::from("/Applications"), home.join("Applications")]
-        .into_iter()
-        .map(|apps| apps.join("Codex.app/Contents/Resources/codex"))
-        .collect()
+    let mut programs = Vec::new();
+    for apps in [PathBuf::from("/Applications"), home.join("Applications")] {
+        for app in ["Codex.app", "ChatGPT.app"] {
+            programs.push(
+                apps.join(app)
+                    .join("Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"),
+            );
+        }
+        programs.push(apps.join("Codex.app/Contents/Resources/codex"));
+    }
+    programs
 }
 
 #[cfg(not(any(windows, target_os = "macos")))]
 fn codex_app_programs(_home: &Path) -> Vec<PathBuf> {
     Vec::new()
+}
+
+/// Where the Claude app may keep its own folder, as the app itself tells: it
+/// is named Claude, Claude-Data or Claude-3p, under `%APPDATA%` or
+/// `%LOCALAPPDATA%` on Windows (or where Windows puts what the Store app
+/// writes to `%APPDATA%`), under `~/Library/Application Support` on macOS.
+fn claude_app_folders(home: &Path) -> Vec<PathBuf> {
+    let mut roots: Vec<PathBuf> = Vec::new();
+    if cfg!(windows) {
+        roots.extend(std::env::var_os("APPDATA").map(PathBuf::from));
+        if let Some(local) = std::env::var_os("LOCALAPPDATA").map(PathBuf::from) {
+            roots.push(
+                local
+                    .join("Packages")
+                    .join("Claude_pzs8sxrjxfjjc")
+                    .join("LocalCache")
+                    .join("Roaming"),
+            );
+            roots.push(local);
+        }
+    } else if cfg!(target_os = "macos") {
+        roots.push(home.join("Library/Application Support"));
+    }
+    roots
+        .iter()
+        .flat_map(|root| ["Claude", "Claude-Data", "Claude-3p"].map(|name| root.join(name)))
+        .collect()
+}
+
+/// The `claude` others carry. The Claude app downloads the one it runs to
+/// `<its folder>/claude-code/<version>/<build>/` (an older app straight to
+/// `<version>/`), on macOS maybe as `claude.app`, and marks it `.verified`
+/// once complete (seen in 3.6556 on Windows; the rest as its code reads). The
+/// Claude Code extension of VS Code and the editors built on it keeps one in
+/// `resources/native-binary` (seen in 2.1.295).
+fn claude_carried(app_folders: &[PathBuf], home: &Path) -> Vec<PathBuf> {
+    let file = if cfg!(windows) {
+        "claude.exe"
+    } else {
+        "claude"
+    };
+    let installs = app_folders
+        .iter()
+        .flat_map(|folder| subdirs(&folder.join("claude-code")))
+        .flat_map(|version| {
+            let mut installs = subdirs(&version);
+            installs.push(version);
+            installs
+        })
+        .filter(|install| install.join(".verified").is_file());
+    let mut programs = Vec::new();
+    for install in installs {
+        if cfg!(target_os = "macos") {
+            programs.push(install.join("claude.app/Contents/MacOS/claude"));
+        }
+        programs.push(install.join(file));
+    }
+    for editor in [
+        ".vscode",
+        ".vscode-insiders",
+        ".vscode-oss",
+        ".cursor",
+        ".windsurf",
+        ".antigravity",
+        ".kiro",
+    ] {
+        programs.extend(
+            subdirs(&home.join(editor).join("extensions"))
+                .into_iter()
+                .filter(|extension| {
+                    extension.file_name().is_some_and(|name| {
+                        name.to_string_lossy().starts_with("anthropic.claude-code-")
+                    })
+                })
+                .map(|extension| extension.join("resources").join("native-binary").join(file)),
+        );
+    }
+    programs
 }
 
 /// The sign-in command for `provider`, with `dir` as the tool's home and
@@ -188,8 +359,11 @@ pub fn command(provider: ProviderId, program: &Path, dir: &Path, search: &[PathB
     let mut cmd = Command::new(program);
     match provider {
         ProviderId::ClaudeCode => {
+            // Not updating itself: it may be the one the Claude app or an
+            // editor extension keeps.
             cmd.args(["auth", "login"])
                 .env("CLAUDE_CONFIG_DIR", dir)
+                .env("DISABLE_AUTOUPDATER", "1")
                 .env_remove("CLAUDE_SECURESTORAGE_CONFIG_DIR");
         }
         ProviderId::Codex => {
@@ -797,6 +971,7 @@ mod tests {
         );
         assert_eq!(args(&cmd), ["auth", "login"]);
         assert_eq!(env(&cmd, "CLAUDE_CONFIG_DIR"), Some(Some(dir.into())));
+        assert_eq!(env(&cmd, "DISABLE_AUTOUPDATER"), Some(Some("1".into())));
         // it would pin the login back to the real keychain item
         assert_eq!(env(&cmd, "CLAUDE_SECURESTORAGE_CONFIG_DIR"), Some(None));
     }
@@ -853,10 +1028,10 @@ mod tests {
     }
 
     #[test]
-    fn only_codex_is_looked_for_inside_an_app() {
+    fn an_editor_carries_no_command() {
         let home = Path::new("/nowhere");
-        assert_eq!(carried_by_app(ProviderId::ClaudeCode, home), None);
-        assert_eq!(carried_by_app(ProviderId::Cursor, home), None);
+        assert_eq!(carried(ProviderId::Cursor, home), None);
+        assert_eq!(carried(ProviderId::Antigravity, home), None);
     }
 
     #[test]
@@ -870,19 +1045,129 @@ mod tests {
             command_in(ProviderId::Codex, &search, nowhere),
             Some(dir.path().join(file))
         );
-        assert_eq!(command_in(ProviderId::ClaudeCode, &search, nowhere), None);
+    }
+
+    /// A program file written at `written`.
+    fn program_at(path: &Path, written: SystemTime) {
+        let file = std::fs::File::create(path).unwrap();
+        file.set_modified(written).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            file.set_permissions(std::fs::Permissions::from_mode(0o755))
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn of_the_carried_programs_the_one_written_last_is_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = |name: &str| dir.path().join(name);
+        let at = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000_000);
+        program_at(&path("old"), at);
+        program_at(&path("new"), at + Duration::from_secs(60));
+        program_at(&path("same"), at + Duration::from_secs(60));
+        assert_eq!(
+            newest_runnable(vec![path("gone"), path("old"), path("new")]),
+            Some(path("new"))
+        );
+        assert_eq!(
+            newest_runnable(vec![path("new"), path("old")]),
+            Some(path("new"))
+        );
+        // of two written at once, the first
+        assert_eq!(
+            newest_runnable(vec![path("same"), path("new")]),
+            Some(path("same"))
+        );
+        // a folder, written since, is not a program
+        assert_eq!(
+            newest_runnable(vec![dir.path().to_path_buf(), path("old")]),
+            Some(path("old"))
+        );
+        assert_eq!(newest_runnable(vec![path("gone")]), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_file_nobody_may_run_is_not_a_program() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("codex");
+        std::fs::write(&file, "").unwrap();
+        assert_eq!(newest_runnable(vec![file]), None);
+    }
+
+    #[test]
+    fn claude_comes_with_the_claude_app_and_the_editor_extension() {
+        let (data, home) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let file = if cfg!(windows) {
+            "claude.exe"
+        } else {
+            "claude"
+        };
+        let done = data.path().join("claude-code/2.1.304/aed62990b91e");
+        let downloading = data.path().join("claude-code/2.1.308/c17a819afb40");
+        let older = data.path().join("claude-code/2.1.200");
+        let extensions = home.path().join(".vscode/extensions");
+        let extension =
+            extensions.join("anthropic.claude-code-2.1.295-win32-x64/resources/native-binary");
+        let other = extensions.join("someone.else-1.0.0/resources/native-binary");
+        for folder in [&done, &downloading, &older, &extension, &other] {
+            std::fs::create_dir_all(folder).unwrap();
+            std::fs::write(folder.join(file), "").unwrap();
+        }
+        for install in [&done, &older] {
+            std::fs::write(install.join(".verified"), "").unwrap();
+        }
+
+        let folders = [
+            Path::new("/nowhere").to_path_buf(),
+            data.path().to_path_buf(),
+        ];
+        let mut found = claude_carried(&folders, home.path());
+        found.sort();
+        let mut expected = vec![extension.join(file)];
+        for install in [&done, &older] {
+            if cfg!(target_os = "macos") {
+                expected.push(install.join("claude.app/Contents/MacOS/claude"));
+            }
+            expected.push(install.join(file));
+        }
+        expected.sort();
+        assert_eq!(found, expected);
+        assert_eq!(
+            claude_carried(&[], Path::new("/nowhere")),
+            Vec::<PathBuf>::new()
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn the_codex_app_runs_copies_of_its_codex_out_of_its_package() {
+        let bin = tempfile::tempdir().unwrap();
+        std::fs::create_dir(bin.path().join("6257d9e8f63c0f2b")).unwrap();
+        assert_eq!(
+            codex_app_copies(bin.path()),
+            [
+                bin.path().join("6257d9e8f63c0f2b").join("codex.exe"),
+                bin.path().join("codex.exe"),
+            ]
+        );
     }
 
     #[cfg(target_os = "macos")]
     #[test]
     fn the_codex_app_keeps_codex_in_its_bundle() {
+        let cli = "Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex";
+        let programs = codex_app_programs(Path::new("/Users/u"));
+        assert_eq!(programs[0], Path::new("/Applications/Codex.app").join(cli));
         assert_eq!(
-            codex_app_programs(Path::new("/Users/u")),
-            [
-                PathBuf::from("/Applications/Codex.app/Contents/Resources/codex"),
-                PathBuf::from("/Users/u/Applications/Codex.app/Contents/Resources/codex"),
-            ]
+            programs[1],
+            Path::new("/Applications/ChatGPT.app").join(cli)
         );
+        assert!(programs.contains(&PathBuf::from(
+            "/Users/u/Applications/Codex.app/Contents/Resources/codex"
+        )));
     }
 
     #[cfg(windows)]
