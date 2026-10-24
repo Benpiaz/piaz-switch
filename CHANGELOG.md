@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.5.2] - 2026-10-24
+
+### Fixed
+- Adding a Codex account on Windows with the Codex app from the Microsoft Store
+  no longer fails with "Access is denied (os error 5)". On some machines Windows
+  lets only the Codex app run the `codex` inside its package; Piaz Switch now
+  signs in with the copy the app makes of it for itself, in
+  `%LOCALAPPDATA%\OpenAI\Codex\bin`.
+- Claude Code is found, and Claude Code accounts can be added, on a machine with
+  only the Claude app or the Claude Code extension of VS Code (or Cursor,
+  Windsurf…): Piaz Switch signs in with the `claude` they carry. Switching
+  changes the account Claude Code uses; the Claude app keeps its own sign-in.
+- A `claude` or `codex` command of your own still comes first. On macOS the
+  Codex app's `codex` is also looked for where the app runs it from.
+
 ## [0.5.1] - 2026-10-19
 
 ### Fixed
