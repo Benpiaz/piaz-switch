@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.5.3] - 2026-10-27
+
+### Fixed
+- A limit nobody has used yet says **not started** instead of looking unread.
+  Between sessions, a Claude Code account's 5-hour limit showed 0% with nothing
+  beside it: Anthropic sends no reset until the first message starts the period.
+  An unused Codex account counted down to resets that never came ("resets in
+  4h 59m", "6d 23h"), a time OpenAI moves on with every read. Both now say not
+  started (hover it for why), in an account's row, in the all-accounts row and in
+  `piaz-switch list`; the period, and its reset, start with the first use.
+
 ## [0.5.2] - 2026-10-24
 
 ### Fixed
