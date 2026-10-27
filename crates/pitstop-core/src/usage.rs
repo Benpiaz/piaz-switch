@@ -36,6 +36,9 @@ pub struct Window {
     /// accounts counts it as 0%, left out wherever one account's limits
     /// are listed.
     pub quiet: bool,
+    /// A limit whose period has not begun: nothing used and no clock
+    /// running. Its period starts with the first use, so it has no reset yet.
+    pub idle: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -283,12 +286,28 @@ fn codex_window(value: &Value, which: &str) -> Option<Window> {
         .get("limit_window_seconds")
         .and_then(Value::as_i64)
         .filter(|s| *s > 0);
+    // Unused, a window answers with all of its length still to run and a
+    // reset that moves on with every read: it starts with the first use. A
+    // minute's slack for the two being worked out a moment apart; an answer
+    // without `reset_after_seconds` can't tell and keeps its reset.
+    let idle = percent == 0.0
+        && length.is_some_and(|l| {
+            value
+                .get("reset_after_seconds")
+                .and_then(Value::as_i64)
+                .is_some_and(|after| after >= l - IDLE_SLACK)
+        });
     Some(Window {
         label: window_name(length, which),
         percent,
-        resets_at: value.get("reset_at").and_then(moment),
+        resets_at: if idle {
+            None
+        } else {
+            value.get("reset_at").and_then(moment)
+        },
         length_secs: length,
         quiet: false,
+        idle,
     })
 }
 
@@ -318,6 +337,9 @@ fn moment(value: &Value) -> Option<i64> {
 
 const FIVE_HOURS: i64 = 18_000;
 const WEEK: i64 = 604_800;
+/// How far short of its whole length a Codex window may be and still be
+/// taken as not started.
+const IDLE_SLACK: i64 = 60;
 
 pub(crate) fn claude_report(result: Result<Value, FetchError>) -> UsageReport {
     report(result, parse)
@@ -383,6 +405,7 @@ pub fn parse_cursor(body: &Value) -> Usage {
             resets_at: end,
             length_secs,
             quiet: false,
+            idle: false,
         }],
         plan: name,
     }
@@ -412,15 +435,17 @@ pub fn parse(body: &Value) -> Usage {
             let Some(percent) = w.get("utilization").and_then(Value::as_f64) else {
                 continue;
             };
+            let resets_at = w
+                .get("resets_at")
+                .and_then(Value::as_str)
+                .and_then(parse_rfc3339);
             windows.push(Window {
                 label: label.into(),
                 percent,
-                resets_at: w
-                    .get("resets_at")
-                    .and_then(Value::as_str)
-                    .and_then(parse_rfc3339),
+                resets_at,
                 length_secs: Some(length),
                 quiet: false,
+                idle: percent == 0.0 && resets_at.is_none(),
             });
         }
     }
@@ -450,15 +475,18 @@ fn window_from_limit(limit: &Value) -> Option<Window> {
     if untouched && !quiet {
         return None;
     }
+    let resets_at = limit
+        .get("resets_at")
+        .and_then(Value::as_str)
+        .and_then(parse_rfc3339);
     Some(Window {
         label,
         percent,
-        resets_at: limit
-            .get("resets_at")
-            .and_then(Value::as_str)
-            .and_then(parse_rfc3339),
+        resets_at,
         length_secs,
         quiet,
+        // Until the first message, the session has no reset to send.
+        idle: percent == 0.0 && resets_at.is_none(),
     })
 }
 
@@ -477,6 +505,7 @@ impl Usage {
                     Some(at) if at > now_secs => {
                         format!("{pct} ({})", short_duration(at - now_secs))
                     }
+                    _ if w.idle => format!("{pct} (not started)"),
                     _ => pct,
                 }
             })
@@ -564,6 +593,7 @@ mod tests {
                 resets_at: Some(1_792_592_000),
                 length_secs: Some(2_592_000),
                 quiet: false,
+                idle: false,
             }]
         );
         assert_eq!(usage.plan, None);
@@ -678,6 +708,7 @@ mod tests {
                 resets_at: Some(1_790_628_078),
                 length_secs: Some(604_800),
                 quiet: false,
+                idle: false,
             }]
         );
     }
@@ -731,6 +762,45 @@ mod tests {
         assert!(parse_codex(&body).windows.is_empty());
     }
 
+    /// A Plus account nobody had used, as OpenAI answered it (2026-10): each
+    /// window has all of its length to run, from whenever it was asked.
+    #[test]
+    fn codex_windows_nobody_used_have_not_started() {
+        let mut body = codex_answer();
+        body["rate_limit"]["primary_window"] = json!({
+            "used_percent": 0, "limit_window_seconds": 18_000,
+            "reset_after_seconds": 18_000, "reset_at": 1_793_114_065i64
+        });
+        body["rate_limit"]["secondary_window"] = json!({
+            "used_percent": 0, "limit_window_seconds": 604_800,
+            "reset_after_seconds": 604_800, "reset_at": 1_793_700_865i64
+        });
+        let usage = parse_codex(&body);
+        let read: Vec<_> = usage
+            .windows
+            .iter()
+            .map(|w| (w.label.as_str(), w.idle, w.resets_at))
+            .collect();
+        assert_eq!(read, [("5h", true, None), ("week", true, None)]);
+        assert_eq!(
+            usage.summary(1_793_096_065),
+            "5h 0% (not started) · week 0% (not started)"
+        );
+        // a second short of the whole length, worked out a moment apart
+        body["rate_limit"]["primary_window"]["reset_after_seconds"] = json!(17_999);
+        assert!(parse_codex(&body).windows[0].idle);
+        // under way, even with nothing counted yet, a window has its reset
+        body["rate_limit"]["primary_window"]["reset_after_seconds"] = json!(17_000);
+        let started = &parse_codex(&body).windows[0];
+        assert!(!started.idle);
+        assert_eq!(started.resets_at, Some(1_793_114_065));
+        // and anything used means it started
+        body["rate_limit"]["secondary_window"]["used_percent"] = json!(1);
+        let used = &parse_codex(&body).windows[1];
+        assert!(!used.idle);
+        assert_eq!(used.resets_at, Some(1_793_700_865));
+    }
+
     fn codex_blob(exp: i64, account_id: Option<&str>) -> Vec<u8> {
         use base64::Engine as _;
         let b64 = |s: &str| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(s);
@@ -775,7 +845,48 @@ mod tests {
         assert_eq!(usage.windows.len(), 2);
         assert_eq!(usage.windows[0].label, "5h");
         assert_eq!(usage.windows[0].resets_at, None);
+        assert!(!usage.windows[0].idle);
         assert_eq!(usage.windows[1].label, "week");
+    }
+
+    /// A Team seat between sessions (2026-10): the session sent with no
+    /// reset, beside the one weekly limit the seat has.
+    #[test]
+    fn a_session_with_nothing_used_and_no_reset_has_not_started() {
+        let body = json!({
+            "five_hour": {"utilization": 0.0, "resets_at": null},
+            "seven_day": null,
+            "limits": [
+                {"kind": "session", "group": "session", "percent": 0,
+                 "resets_at": null, "scope": null, "is_active": false},
+                {"kind": "weekly_scoped", "group": "weekly", "percent": 2,
+                 "resets_at": "2026-10-28T14:00:00.181226+00:00",
+                 "scope": {"model": {"id": null, "display_name": "Fable"}}, "is_active": true}
+            ]
+        });
+        let usage = parse(&body);
+        let idle: Vec<_> = usage
+            .windows
+            .iter()
+            .map(|w| (w.label.as_str(), w.idle))
+            .collect();
+        assert_eq!(idle, [("5h", true), ("week Fable", false)]);
+        let now = parse_rfc3339("2026-10-27T10:10:00Z").unwrap();
+        assert_eq!(
+            usage.summary(now),
+            "5h 0% (not started) · week Fable 2% (1d3h)"
+        );
+        // the first message starts it: a reset comes back before any share does
+        let mut started = body.clone();
+        started["limits"][0]["resets_at"] = json!("2026-10-27T15:10:00.181022+00:00");
+        assert!(!parse(&started).windows[0].idle);
+        // a share used is never not started, reset or no
+        let mut used = body.clone();
+        used["limits"][0]["percent"] = json!(3);
+        assert!(!parse(&used).windows[0].idle);
+        // the same between sessions without the `limits` list
+        let older = parse(&json!({"five_hour": {"utilization": 0.0, "resets_at": null}}));
+        assert!(older.windows[0].idle);
     }
 
     #[test]

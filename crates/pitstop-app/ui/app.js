@@ -640,13 +640,20 @@ function metersOf(tool, account, moves) {
   for (const w of windows) {
     // Past its reset a limit has started afresh, before the next read says so.
     const fresh = Boolean(w.resetsAt && w.resetsAt <= now);
-    const resets = fresh ? t("justReset") : w.resetsAt && w.resetsAt > now ? t("resetsIn", { d: duration(w.resetsAt - now) }) : "";
+    const resets = fresh
+      ? t("justReset")
+      : w.resetsAt && w.resetsAt > now
+        ? t("resetsIn", { d: duration(w.resetsAt - now) })
+        : w.idle
+          ? t("notStarted")
+          : "";
     meterLine(grid, moves, {
       id: `${rowKey(tool.id, account.name)}|${w.label}`,
       label: windowName(w.label),
       used: fresh ? 0 : w.percent,
       pace: fresh ? null : paceOf(w, now),
       resets,
+      resetsHelp: w.idle ? t("notStartedHelp") : undefined,
     });
   }
   return grid;
@@ -701,8 +708,8 @@ function poolRow(tool, moves) {
       reset ||= fresh;
       // Past 100% an account holds no more than all of its own limit.
       used += share * (fresh ? 0 : Math.min(100, w.percent));
-      // A limit that just reset is at the start of an even pace.
-      const pace = fresh ? { expected: 0 } : paceOf(w, now);
+      // A limit that just reset, or has not started, is at the start of an even pace.
+      const pace = fresh || w.idle ? { expected: 0 } : paceOf(w, now);
       if (pace) {
         paced++;
         expected += share * pace.expected;
@@ -717,13 +724,15 @@ function poolRow(tool, moves) {
       pace = { expected, diff, standing: Math.abs(diff) <= 3 ? "even" : diff > 0 ? "over" : "under" };
     }
     const n = found.length;
+    const idle = !nextReset && !reset && found.every(([, w]) => w.idle);
     meterLine(grid, moves, {
       // `*` can't be in an account's name, so this never meets a row's id.
       id: `${tool.id}|*pool|${label}`,
       label: windowName(label),
       used,
       pace,
-      resets: nextReset ? t("poolResets", { d: duration(nextReset - now) }) : reset ? t("justReset") : "",
+      resets: nextReset ? t("poolResets", { d: duration(nextReset - now) }) : reset ? t("justReset") : idle ? t("notStarted") : "",
+      resetsHelp: idle ? t("notStartedHelp") : undefined,
       help: n < count ? t("poolHelpSome", { n, total: count }) : t("poolHelp", { n }),
     });
   }
@@ -757,7 +766,7 @@ function poolRow(tool, moves) {
 
 /** One line of a meters grid: `used` as a bar with the even-pace tick,
  * the figure, then when it resets and how far off pace it is. */
-function meterLine(grid, moves, { id, label, used, pace, resets, help }) {
+function meterLine(grid, moves, { id, label, used, pace, resets, resetsHelp, help }) {
   const percent = Math.max(0, Math.min(100, used));
   const level = used >= 100 ? " out" : used >= 75 ? " low" : "";
   const fill = h("div", { class: "bar-fill" + level + (percent > 0 ? "" : " none") });
@@ -785,7 +794,7 @@ function meterLine(grid, moves, { id, label, used, pace, resets, help }) {
     h(
       "span",
       { class: "meter-meta" },
-      resets ? h("span", { class: "meter-resets", text: resets }) : null,
+      resets ? h("span", { class: "meter-resets", text: resets, title: resetsHelp }) : null,
       paceWords ? h("span", { class: "meter-pace" + (pace.standing === "over" ? " over" : ""), text: paceWords }) : null,
     ),
   );

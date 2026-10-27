@@ -141,6 +141,8 @@ pub struct WindowView {
     /// A per-model limit nobody has used: the window counts it in totals
     /// over accounts, not in an account's own list.
     pub quiet: bool,
+    /// Nothing used and no period running: it starts with the first use.
+    pub idle: bool,
 }
 
 /// The account in use ran out of a limit and another has room.
@@ -369,6 +371,7 @@ impl From<&UsageReport> for UsageView {
                         resets_at: w.resets_at,
                         length_secs: w.length_secs,
                         quiet: w.quiet,
+                        idle: w.idle,
                     })
                     .collect(),
             },
@@ -656,6 +659,7 @@ mod tests {
             resets_at: Some(NOW + 2 * 3_600 + 9 * 60),
             length_secs: Some(18_000),
             quiet: false,
+            idle: false,
         }
     }
 
@@ -777,6 +781,7 @@ mod tests {
                     resets_at: Some(NOW + 2 * 3_600 + 9 * 60),
                     length_secs: Some(18_000),
                     quiet: false,
+                    idle: false,
                 }]
             })
         );

@@ -610,6 +610,7 @@ mod tests {
             resets_at: resets_in.map(|s| NOW + s),
             length_secs: None,
             quiet: false,
+            idle: false,
         }
     }
 
