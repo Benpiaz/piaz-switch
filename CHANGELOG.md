@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.5.4] - 2026-10-31
+
+### Fixed
+- Adding an Antigravity account no longer ends with "The sign-in did not finish"
+  (#4). Since Antigravity 2.0 Google ships two apps: Antigravity IDE, the editor,
+  and the Antigravity 2 app, which installs where the editor used to be and keeps
+  its Google login in Windows Credential Manager (the Keychain on macOS). Piaz
+  Switch opened that app to sign in, and the login it waits for never came. It now
+  signs in, switches and reads limits with Antigravity IDE (or the editor before
+  2.0), in the data folder the IDE really uses, and never opens, closes or signs in
+  to the Antigravity 2 app. Install Antigravity IDE to add Antigravity accounts;
+  the Add dialog says so when it isn't there.
+- A folder the Antigravity 2 installer put its app into, beside an older editor,
+  runs that app from every program in it, so it doesn't count as Antigravity IDE.
+  Where that app goes by the same program name as your editor, Piaz Switch asks
+  you to close the editor yourself instead of closing it by name.
+- Switching a Cursor or Antigravity account while that editor isn't on the
+  computer says so straight away, instead of offering to restart it.
+
 ## [0.5.3] - 2026-10-27
 
 ### Fixed
