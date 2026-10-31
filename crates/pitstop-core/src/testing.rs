@@ -101,6 +101,11 @@ impl Host for FakeHost {
         PathBuf::from("/fake-home/app-data")
     }
 
+    /// As if its newest build were installed.
+    fn editor_data(&self, app: &crate::editor::App) -> PathBuf {
+        self.app_data().join(app.default_data_folder())
+    }
+
     fn vscdb_get(&self, db: &Path, keys: &[&str]) -> Result<Option<BTreeMap<String, String>>> {
         Ok(self.vscdbs.borrow().get(db).map(|rows| {
             rows.iter()

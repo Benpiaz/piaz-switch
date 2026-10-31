@@ -1071,6 +1071,13 @@ function closeMenu() {
 const EDITORS = ["cursor", "antigravity"];
 const isEditor = (id) => EDITORS.includes(id);
 
+/** Why a switch failed. An editor that isn't there is named by its tool's
+ *  name; for Antigravity the words say which editor Piaz Switch looks for. */
+function switchErrorText(error) {
+  const missing = error && error.code === "editorMissing" && snap && snap.tools.find((x) => x.name === error.name);
+  return errorText(missing && missing.id === "antigravity" ? { ...error, code: "editorMissingAntigravity" } : error);
+}
+
 async function useAccount(tool, account, force, restart) {
   if (!tool || !account) return;
   const key = rowKey(tool.id, account.name);
@@ -1091,7 +1098,7 @@ async function useAccount(tool, account, force, restart) {
     else if (result.needsRestart) openConfirmRestart(tool, account, Boolean(force));
     else if (result.switched) noticeSwitched(result);
   } catch (error) {
-    openAlert(t("couldntSwitch", { name: account.name }), errorText(error));
+    openAlert(t("couldntSwitch", { name: account.name }), switchErrorText(error));
   } finally {
     switching.delete(key);
     renderPane();
@@ -1486,7 +1493,8 @@ const DIALOGS = {
               nameBroken ? nameHint(d) : null,
             ],
         missing.map((x) =>
-          h("p", { class: "footnote", text: isEditor(x.id) ? t("appMissing", { tool: x.name }) : t("toolMissing", { tool: x.name, program: x.id === "codex" ? "codex" : "claude" }) }),
+          // Antigravity counts only as its editor: say so, since the Antigravity 2 app may be there.
+          h("p", { class: "footnote", text: x.id === "antigravity" ? t("appMissingAntigravity") : isEditor(x.id) ? t("appMissing", { tool: x.name }) : t("toolMissing", { tool: x.name, program: x.id === "codex" ? "codex" : "claude" }) }),
         ),
         d.again ? null : h("p", { class: "footnote", text: isEditor(d.provider) ? t("addWarningEditor", { tool: toolName }) : t("addWarning") }),
       ),
@@ -2095,7 +2103,7 @@ async function start() {
   await listen("open-dialog", onOpenDialog);
   await listen("switched", noticeSwitched);
   await listen("auto-switched", noticeAutoSwitched);
-  await listen("switch-failed", (failure) => openAlert(t("couldntSwitch", { name: failure.name }), errorText(failure.error)));
+  await listen("switch-failed", (failure) => openAlert(t("couldntSwitch", { name: failure.name }), switchErrorText(failure.error)));
   // A quick first read draws straight away; a slow one shows the skeleton
   // meanwhile instead of an empty window.
   const first = invoke("get_snapshot");

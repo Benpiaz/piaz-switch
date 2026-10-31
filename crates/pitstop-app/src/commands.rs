@@ -104,6 +104,19 @@ pub fn switch(
     let state = app.state::<AppState>();
     let mut restarted = false;
     if let Some(editor) = editor::app(pid) {
+        // No editor installed, nothing reads the login: say so before asking
+        // to close anything (the Antigravity 2 app is not Antigravity's
+        // editor, and keeps its login elsewhere).
+        let Some(build) = editor.find(&app::real_home()) else {
+            return Err(UiError {
+                code: "editorMissing",
+                message: format!(
+                    "Piaz Switch didn't find {} on this computer, so it can't switch it.",
+                    editor.name
+                ),
+                name: Some(pid.display_name().into()),
+            });
+        };
         // What can be answered without closing it is answered first.
         match app::engine().live(pid) {
             Ok(Live::Account(live)) if live == name => return Ok(unchanged(false, None)),
@@ -119,6 +132,18 @@ pub fn switch(
             ));
         }
         if editor.running() {
+            // Another app goes by its program name: Piaz Switch won't close
+            // it, so it doesn't offer to.
+            if !build.closable() {
+                let name = pid.display_name();
+                return Err(UiError {
+                    code: "editorCloseYourself",
+                    message: format!(
+                        "{name} is open, and another app on this computer goes by the same program name, so Piaz Switch won't close it for you. Close {name}, then switch again."
+                    ),
+                    name: Some(name.into()),
+                });
+            }
             if !restart_editor {
                 return Ok(Switched {
                     needs_restart: true,

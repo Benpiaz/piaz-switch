@@ -15,10 +15,12 @@
 //! The editors have no command to sign in with:
 //! - Cursor signs in on its site, as its own command line does (see
 //!   [`crate::cursor_login`]); the tokens land in the private directory.
-//! - Antigravity opens as itself with the private directory as its data
+//! - Antigravity IDE opens as itself with the private directory as its data
 //!   directory, a window apart from the one in daily use; the user signs in
 //!   to Google there, and once the login is in its database the window is
-//!   closed. Nothing but Antigravity itself talks to Google.
+//!   closed. Nothing but Antigravity IDE itself talks to Google. The
+//!   Antigravity 2 app is never opened for it: it keeps its login in the OS
+//!   keyring, where a sign-in would replace the user's (see [`crate::editor`]).
 
 use std::collections::HashSet;
 use std::io::{Read, Write};
@@ -128,11 +130,12 @@ pub fn find_in(name: &str, dirs: &[PathBuf]) -> Option<PathBuf> {
         .find(|path| path.is_file())
 }
 
-/// Where `provider`'s tool is, if anywhere: a command, or an editor app.
-/// `home` is the real home directory, where installers put the tools.
+/// Where `provider`'s tool is, if anywhere: a command, or an editor app (for
+/// Antigravity, only its editor). `home` is the real home directory, where
+/// installers put the tools.
 pub fn find_program(provider: ProviderId, home: &Path) -> Option<PathBuf> {
     match editor::app(provider) {
-        Some(app) => app.find(home),
+        Some(app) => app.find(home).map(|build| build.path),
         None => command_in(provider, &search_path(home), home),
     }
 }

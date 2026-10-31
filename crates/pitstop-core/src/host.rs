@@ -24,6 +24,10 @@ pub trait Host {
     /// Where editors keep their data: `%APPDATA%` on Windows,
     /// `~/Library/Application Support` on macOS, `~/.config` elsewhere.
     fn app_data(&self) -> PathBuf;
+    /// The user data directory of `app`'s build in use: under
+    /// [`Host::app_data`], in the folder that build keeps its data in (see
+    /// [`crate::editor::App::data_folder`]).
+    fn editor_data(&self, app: &crate::editor::App) -> PathBuf;
     /// `keys` from an editor's `state.vscdb` (see [`crate::vscdb`]); None
     /// when the database isn't there.
     fn vscdb_get(&self, db: &Path, keys: &[&str]) -> Result<Option<BTreeMap<String, String>>>;
@@ -132,6 +136,12 @@ impl Host for RealHost {
             Some(home) => home.join(".config"),
             None => dirs::config_dir().unwrap_or_else(|| self.home().join(".config")),
         }
+    }
+
+    fn editor_data(&self, app: &crate::editor::App) -> PathBuf {
+        // Programs live under the real home, whatever a sandboxed one says.
+        let home = dirs::home_dir().unwrap_or_default();
+        self.app_data().join(app.data_folder(&home))
     }
 
     fn vscdb_get(&self, db: &Path, keys: &[&str]) -> Result<Option<BTreeMap<String, String>>> {

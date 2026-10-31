@@ -180,11 +180,24 @@ fn main() {
                     .iter()
                     .filter(|a| a.name == name && provider.is_none_or(|p| p == a.provider))
                     .find_map(|a| pitstop_core::editor::app(a.provider));
-                if let Some(app) = editor.filter(|app| app.running()) {
-                    anyhow::bail!(
-                        "{0} is open; quit {0}, run this again, then open {0}",
-                        app.provider.display_name()
-                    );
+                if let Some(app) = editor {
+                    // Programs live under the real home, whatever --home says.
+                    // No editor installed, nothing reads the login (the
+                    // Antigravity 2 app is not Antigravity's editor).
+                    let home =
+                        dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home directory"))?;
+                    if app.find(&home).is_none() {
+                        anyhow::bail!(
+                            "Piaz Switch didn't find {} on this computer, so it can't switch it",
+                            app.name
+                        );
+                    }
+                    if app.running() {
+                        anyhow::bail!(
+                            "{0} is open; quit {0}, run this again, then open {0}",
+                            app.provider.display_name()
+                        );
+                    }
                 }
                 match engine.switch(&name, provider)? {
                     SwitchOutcome::AlreadyActive => println!("`{name}` is already active."),
