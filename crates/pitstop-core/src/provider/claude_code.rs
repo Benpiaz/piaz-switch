@@ -131,6 +131,9 @@ impl ClaudeCode {
 
     /// `blob` with the token a run lent it left in `dir`, when Claude Code
     /// renewed it meanwhile; `None` when it is unchanged, gone or no token.
+    /// A login Claude Code signed out, its tokens blanked once a renewal was
+    /// refused, comes back too: kept, it reads as needing a sign-in, where the
+    /// one lent would only be refused again.
     pub fn renewed(&self, host: &dyn Host, dir: &Path, blob: &[u8]) -> Result<Option<Vec<u8>>> {
         let old: Blob = serde_json::from_slice(blob)
             .map_err(|e| Error::InvalidData(format!("claude-code blob: {e}")))?;
@@ -557,6 +560,32 @@ mod tests {
             .renewed(&host, dir, &parked)
             .unwrap()
             .is_some());
+    }
+
+    #[test]
+    fn a_lent_login_claude_code_signed_out_comes_back_signed_out() {
+        let host = FakeHost::new();
+        let dir = Path::new("/tmp/piaz-warm-3");
+        let parked = serde_json::to_vec(&serde_json::json!({
+            "credentials": CREDS_A,
+            "oauth_account": {"emailAddress": "a@x.com"},
+        }))
+        .unwrap();
+        keychain_provider().lend(&host, dir, &parked).unwrap();
+        // the renewal was refused: Claude Code blanks the tokens
+        let blanked = r#"{"claudeAiOauth":{"accessToken":"","refreshToken":"","expiresAt":0}}"#;
+        host.keychain_set(&signed_in_service(dir), blanked).unwrap();
+
+        let back = keychain_provider()
+            .renewed(&host, dir, &parked)
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            crate::usage::claude_token(&back, 1_800_000_000),
+            crate::usage::Token::SignedOut
+        ));
+        let back: serde_json::Value = serde_json::from_slice(&back).unwrap();
+        assert_eq!(back["oauth_account"]["emailAddress"], "a@x.com");
     }
 
     fn blob_with(oauth_account: serde_json::Value, credentials: serde_json::Value) -> Vec<u8> {

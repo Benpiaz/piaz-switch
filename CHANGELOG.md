@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- A parked Claude Code login that can no longer be renewed says **sign in again**,
+  with the button beside it, instead of "switching renews it". When Anthropic
+  refused a renewal, during a warm-up or in Claude Code, Claude Code blanked the
+  login's tokens, and Piaz Switch read what was left as a token that had only
+  lapsed: the warm-up said the login couldn't be renewed while the account's row
+  promised a switch would renew it, and a switch left Claude Code signed out. A
+  login whose refresh token is past the date it came with reads the same way.
+
 ## [0.6.0] - 2026-11-04
 
 ### Added

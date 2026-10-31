@@ -576,6 +576,7 @@ impl Request {
             ProviderId::ClaudeCode => match usage::claude_token(blob, now) {
                 Token::Valid(token) => Ok(Request::Claude(token)),
                 Token::Expired => Err(UsageReport::Expired),
+                Token::SignedOut => Err(UsageReport::Unauthorized),
                 Token::Missing => Err(missing()),
             },
             ProviderId::Codex => match usage::codex_token(blob, now) {
@@ -1627,6 +1628,25 @@ mod tests {
         assert_eq!(report_for(&all, "old"), &UsageReport::Expired);
         assert_eq!(report_for(&all, "revoked"), &UsageReport::Unauthorized);
         assert_eq!(api.seen.lock().unwrap().as_slice(), ["SECRET-REVOKED"]);
+    }
+
+    #[test]
+    fn a_login_claude_code_signed_out_reads_as_needing_a_sign_in_not_as_expired() {
+        // What Claude Code leaves once a renewal is refused: no switch renews it.
+        let blanked = r#"{"claudeAiOauth":{"accessToken":"","refreshToken":"","expiresAt":0}}"#;
+        let host = FakeHost::new();
+        host.put_file(ClaudeCode::credentials_path(&host), blanked);
+        host.put_file(ClaudeCode::config_path(&host), config("b@x.com"));
+        let engine = Engine::new(host);
+        engine.enroll(ProviderId::ClaudeCode, "gone").unwrap();
+        sign_in_as(engine.host(), TOKEN_A, "a@x.com");
+        engine.enroll(ProviderId::ClaudeCode, "work").unwrap();
+
+        let api = FakeApi::new();
+        let all = engine.usage(&api).unwrap();
+        assert_eq!(report_for(&all, "gone"), &UsageReport::Unauthorized);
+        assert_eq!(five_hour(report_for(&all, "work")), 10.0);
+        assert_eq!(api.seen.lock().unwrap().as_slice(), [TOKEN_A]);
     }
 
     #[test]

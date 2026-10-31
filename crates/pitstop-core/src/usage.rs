@@ -64,7 +64,8 @@ pub enum UsageReport {
     /// The parked access token has lapsed; switching to the account lets
     /// Claude Code renew it.
     Expired,
-    /// Anthropic refused the token (revoked or signed out elsewhere).
+    /// Anthropic refused the token (revoked or signed out elsewhere), or the
+    /// login holds nothing that renews any more.
     Unauthorized,
     Failed(String),
 }
@@ -249,11 +250,16 @@ fn renewal_refused(status: u16, said: Option<&Value>) -> FetchError {
 pub(crate) enum Token {
     Valid(String),
     Expired,
+    /// Nothing in it works or renews: only signing in again mends it.
+    SignedOut,
     Missing,
 }
 
 /// Pull `claudeAiOauth.accessToken` out of a claude-code blob, unless its
-/// `expiresAt` (epoch ms) is already past.
+/// `expiresAt` (epoch ms) is already past. A login is signed out when its
+/// tokens are blank, as Claude Code leaves them once a renewal is refused, or
+/// when it lapsed with a refresh token that is blank or past
+/// `refreshTokenExpiresAt`: switching to it would leave Claude Code signed out.
 pub(crate) fn claude_token(blob: &[u8], now_secs: i64) -> Token {
     let credentials = serde_json::from_slice::<Value>(blob)
         .ok()
@@ -265,9 +271,24 @@ pub(crate) fn claude_token(blob: &[u8], now_secs: i64) -> Token {
     let Some(token) = oauth.get("accessToken").and_then(Value::as_str) else {
         return Token::Missing;
     };
-    match oauth.get("expiresAt").and_then(Value::as_i64) {
-        Some(expires_ms) if expires_ms / 1000 <= now_secs => Token::Expired,
-        _ => Token::Valid(token.to_owned()),
+    if token.is_empty() {
+        return Token::SignedOut;
+    }
+    let past = |key: &str| {
+        oauth
+            .get(key)
+            .and_then(Value::as_i64)
+            .is_some_and(|ms| ms / 1000 <= now_secs)
+    };
+    if !past("expiresAt") {
+        return Token::Valid(token.to_owned());
+    }
+    // A login with no refresh token at all is left for Claude Code to judge.
+    let refresh_blank = oauth.get("refreshToken").and_then(Value::as_str) == Some("");
+    if refresh_blank || past("refreshTokenExpiresAt") {
+        Token::SignedOut
+    } else {
+        Token::Expired
     }
 }
 
@@ -1235,5 +1256,41 @@ mod tests {
             renewal_refused(400, Some(&json!({"error": "invalid_scope"}))),
             FetchError::Other(why) if why == "Anthropic answered 400 (invalid_scope)"
         ));
+    }
+
+    #[test]
+    fn a_login_that_nothing_renews_is_signed_out_not_expired() {
+        let now = 1_800_000_000;
+        let (lapsed, later) = ((now - 1) * 1000, (now + 60) * 1000);
+        // what Claude Code left after a renewal was refused
+        let blanked = json!({"accessToken": "", "refreshToken": "", "expiresAt": 0,
+            "refreshTokenExpiresAt": later});
+        assert!(matches!(
+            claude_token(&login(blanked), now),
+            Token::SignedOut
+        ));
+        let no_refresh = json!({"accessToken": "AT", "refreshToken": "", "expiresAt": lapsed});
+        assert!(matches!(
+            claude_token(&login(no_refresh), now),
+            Token::SignedOut
+        ));
+        let refresh_lapsed = json!({"accessToken": "AT", "refreshToken": "R",
+            "expiresAt": lapsed, "refreshTokenExpiresAt": lapsed});
+        assert!(matches!(
+            claude_token(&login(refresh_lapsed), now),
+            Token::SignedOut
+        ));
+
+        // a refresh token still good is renewed by Claude Code on a switch
+        let renewable = json!({"accessToken": "AT", "refreshToken": "R",
+            "expiresAt": lapsed, "refreshTokenExpiresAt": later});
+        assert!(matches!(
+            claude_token(&login(renewable), now),
+            Token::Expired
+        ));
+        // and a live access token reads whatever its refresh token says
+        let live = json!({"accessToken": "AT", "refreshToken": "R",
+            "expiresAt": later, "refreshTokenExpiresAt": lapsed});
+        assert!(matches!(claude_token(&login(live), now), Token::Valid(t) if t == "AT"));
     }
 }
