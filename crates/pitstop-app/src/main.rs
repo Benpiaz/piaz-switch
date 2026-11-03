@@ -11,10 +11,12 @@ mod i18n;
 mod jumplist;
 mod links;
 mod model;
+mod notified;
 mod renew;
 mod settings;
 mod signin;
 mod spend;
+mod toast;
 mod tray;
 mod tray_look;
 mod updates;
@@ -105,6 +107,9 @@ fn main() {
             #[cfg(target_os = "macos")]
             tauri_app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             let handle = tauri_app.handle().clone();
+            // Before anything is posted: a notification shown earlier reports
+            // no click.
+            toast::listen(&handle);
             tray::create(&handle)?;
             app::apply_window_theme(&handle, settings::load(&app::host()).theme.as_deref());
             app::refresh(&handle);

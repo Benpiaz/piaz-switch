@@ -124,8 +124,8 @@ impl Lang {
     /// The line under a run-out notification.
     pub fn still_has_room(self, name: &str) -> String {
         match self {
-            Lang::En => format!("{name} still has room — open Piaz Switch to switch."),
-            Lang::Vi => format!("{name} vẫn còn — mở Piaz Switch để chuyển."),
+            Lang::En => format!("{name} still has room."),
+            Lang::Vi => format!("{name} vẫn còn chỗ."),
         }
     }
 
@@ -172,6 +172,108 @@ impl Lang {
                 "{to} không có giới hạn tuần, phần không dùng mất sau mỗi 5 giờ: dùng {to} trước."
             ),
         }
+    }
+
+    /// A limit of the account in use at the share (`reached`: used up), for
+    /// a tool not switched by itself: `Codex: 5-hour limit almost reached`.
+    pub fn near_title(self, tool: &str, window: &str, reached: bool) -> String {
+        match (self, reached) {
+            (Lang::En, false) => format!("{tool}: {window} limit almost reached"),
+            (Lang::En, true) => format!("{tool}: {window} limit reached"),
+            (Lang::Vi, false) => format!("{tool}: sắp hết giới hạn {window}"),
+            (Lang::Vi, true) => format!("{tool}: đã hết giới hạn {window}"),
+        }
+    }
+
+    /// Who used how much, and where to go: an account with room, or when
+    /// the limit resets when none has any.
+    pub fn near_body(
+        self,
+        from: &str,
+        percent: f64,
+        window: &str,
+        to: Option<&str>,
+        resets_in: Option<&str>,
+    ) -> String {
+        let percent = percent.floor().min(100.0);
+        let used = match self {
+            Lang::En => format!("{from} has used {percent:.0}% of its {window} limit."),
+            Lang::Vi => format!("{from} đã dùng {percent:.0}% giới hạn {window}."),
+        };
+        let next = match (self, to, resets_in) {
+            (Lang::En, Some(to), _) => format!("{to} has room."),
+            (Lang::En, None, Some(after)) => {
+                format!("No other account has room; it resets in {after}.")
+            }
+            (Lang::En, None, None) => "No other account has room.".into(),
+            (Lang::Vi, Some(to), _) => format!("{to} vẫn còn chỗ."),
+            (Lang::Vi, None, Some(after)) => {
+                format!("Không tài khoản nào khác còn chỗ; giới hạn reset sau {after}.")
+            }
+            (Lang::Vi, None, None) => "Không tài khoản nào khác còn chỗ.".into(),
+        };
+        format!("{used} {next}")
+    }
+
+    pub fn switch_back(self) -> &'static str {
+        self.pick("Switch back", "Chuyển lại")
+    }
+
+    pub fn resets_first_title(self) -> &'static str {
+        self.pick(
+            "Another account resets first",
+            "Có tài khoản reset tuần sớm hơn",
+        )
+    }
+
+    /// Why `to` is worth using first: its week resets sooner, or it has
+    /// none and loses what it leaves every five hours.
+    pub fn resets_first_body(
+        self,
+        from: &str,
+        to: &str,
+        to_resets: Option<&str>,
+        from_resets: Option<&str>,
+    ) -> String {
+        match (self, to_resets, from_resets) {
+            (Lang::En, Some(to_at), Some(from_at)) => format!(
+                "{to}'s week resets at {to_at}, before {from}'s at {from_at}. Use it first so its quota isn't lost."
+            ),
+            (Lang::En, Some(to_at), None) => format!(
+                "{to}'s week resets at {to_at}, before {from}'s. Use it first so its quota isn't lost."
+            ),
+            (Lang::En, None, _) => format!(
+                "{to} has no weekly limit, so what it leaves is lost every 5 hours. Use it first."
+            ),
+            (Lang::Vi, Some(to_at), Some(from_at)) => format!(
+                "Tuần của {to} reset lúc {to_at}, trước {from} ({from_at}). Dùng {to} trước để không mất quota."
+            ),
+            (Lang::Vi, Some(to_at), None) => format!(
+                "Tuần của {to} reset lúc {to_at}, trước {from}. Dùng {to} trước để không mất quota."
+            ),
+            (Lang::Vi, None, _) => format!(
+                "{to} không có giới hạn tuần, phần không dùng mất sau mỗi 5 giờ. Dùng {to} trước."
+            ),
+        }
+    }
+
+    pub fn sign_in_lost_title(self) -> &'static str {
+        self.pick("Sign-in no longer works", "Đăng nhập không còn dùng được")
+    }
+
+    pub fn sign_in_lost_body(self, tool: &str, name: &str) -> String {
+        match self {
+            Lang::En => format!(
+                "{tool} refused {name}'s saved sign-in. Sign in to it again to keep switching to it."
+            ),
+            Lang::Vi => format!(
+                "{tool} từ chối đăng nhập đã lưu của {name}. Đăng nhập lại để tiếp tục chuyển sang tài khoản này."
+            ),
+        }
+    }
+
+    pub fn sign_in_again(self) -> &'static str {
+        self.pick("Sign in again", "Đăng nhập lại")
     }
 
     pub fn cant_auto_switch(self) -> &'static str {

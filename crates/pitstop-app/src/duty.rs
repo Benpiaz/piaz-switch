@@ -722,6 +722,130 @@ pub fn run_out_notices(
         .collect()
 }
 
+/// A limit of the account in use at the share, for a tool that isn't
+/// switched by itself: once per limit and reset, naming the account that
+/// comes first among those with room, or none.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NearNotice {
+    pub key: String,
+    pub provider: &'static str,
+    pub from: String,
+    pub window: String,
+    pub percent: f64,
+    pub resets_at: Option<i64>,
+    pub to: Option<String>,
+}
+
+/// The near-limit notices due: for each tool whose account in use has a
+/// limit at `threshold` or more, unless it is Claude Code and `claude_auto`
+/// (the automatic switch handles it). Claude Code's offer follows `order`,
+/// the other tools' the most room. A limit used up that the run-out notice
+/// already covers (`run_out_too`, and an account has room) is left to it.
+/// `sent` holds the keys already notified.
+pub fn near_notices(
+    tools: &[ToolView],
+    threshold: u8,
+    order: UseFirst,
+    claude_auto: bool,
+    run_out_too: bool,
+    sent: &HashSet<String>,
+    now: i64,
+) -> Vec<NearNotice> {
+    let at = f64::from(threshold);
+    tools
+        .iter()
+        .filter_map(|tool| {
+            let claude = tool.id == "claude-code";
+            if claude && claude_auto {
+                return None;
+            }
+            let active = tool.accounts.iter().find(|a| a.in_use)?;
+            let full = windows_of(active)?
+                .iter()
+                .filter(|w| used_now(w, now) >= at)
+                .max_by(|x, y| used_now(x, now).total_cmp(&used_now(y, now)))?;
+            let percent = used_now(full, now);
+            let order = if claude { order } else { UseFirst::MostLeft };
+            let to = switch_target(tool, threshold, order, now).map(|plan| plan.to);
+            if run_out_too && percent >= 100.0 && to.is_some() {
+                return None;
+            }
+            let key = near_key(tool.id, &active.name, &full.label, full.resets_at);
+            (!sent.contains(&key)).then(|| NearNotice {
+                key,
+                provider: tool.id,
+                from: active.name.clone(),
+                window: full.label.clone(),
+                percent,
+                resets_at: full.resets_at,
+                to,
+            })
+        })
+        .collect()
+}
+
+/// The reset a notice key ends with (`…|<epoch seconds>`), where known.
+pub fn key_resets(key: &str) -> Option<i64> {
+    key.rsplit('|')
+        .next()
+        .and_then(|at| at.parse().ok())
+        .filter(|&at| at > 0)
+}
+
+/// Names a near-limit notice: one per account, limit and reset.
+pub fn near_key(provider: &str, from: &str, window: &str, resets_at: Option<i64>) -> String {
+    format!("near|{provider}|{from}|{window}|{}", resets_at.unwrap_or(0))
+}
+
+/// Names a "resets first" notice: one per account and week, keeping the
+/// [`early_key`] it was posted for after the `first|`.
+pub fn resets_first_key(to: &str, to_resets: Option<i64>) -> String {
+    format!("first|{}", early_key(to, to_resets))
+}
+
+/// The [`early_key`]s of the accounts a "resets first" notice was posted for.
+pub fn resets_first_spent<'a>(keys: impl Iterator<Item = &'a String>) -> HashSet<String> {
+    keys.filter_map(|k| k.strip_prefix("first|").map(str::to_owned))
+        .collect()
+}
+
+/// Names a "sign-in no longer works" notice for an account.
+pub fn sign_in_key(provider: &str, name: &str) -> String {
+    format!("signin|{provider}|{name}")
+}
+
+/// The accounts whose login the service refused and that weren't notified
+/// yet, and the sign-in notices to forget: those of accounts read fine
+/// since, or gone, so a later refusal is notified again.
+pub fn sign_in_notices(
+    tools: &[ToolView],
+    notified: &HashSet<String>,
+) -> (Vec<(&'static str, String)>, Vec<String>) {
+    let mut due = Vec::new();
+    let mut known = HashSet::new();
+    let mut fine = Vec::new();
+    for tool in tools {
+        for account in &tool.accounts {
+            let key = sign_in_key(tool.id, &account.name);
+            known.insert(key.clone());
+            match &account.usage {
+                Some(UsageView::Unauthorized) if !notified.contains(&key) => {
+                    due.push((tool.id, account.name.clone()));
+                }
+                Some(UsageView::Ok { .. }) if notified.contains(&key) => fine.push(key),
+                _ => {}
+            }
+        }
+    }
+    fine.extend(
+        notified
+            .iter()
+            .filter(|k| k.starts_with("signin|") && !known.contains(*k))
+            .cloned(),
+    );
+    (due, fine)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1195,6 +1319,175 @@ mod tests {
         let plan = switch_target(&tools[0], 90, UseFirst::MostLeft, NOW).unwrap();
         let handled: HashSet<String> = [plan.key("claude-code")].into();
         assert!(run_out_notices(&tools, &suggestions, &handled, NOW).is_empty());
+    }
+
+    // ---- near-limit, resets-first and sign-in notices
+
+    fn tool_of(id: &'static str, accounts: Vec<AccountView>) -> ToolView {
+        ToolView {
+            id,
+            name: id,
+            installed: Some(true),
+            live: LiveView::LoggedOut,
+            accounts,
+        }
+    }
+
+    #[test]
+    fn a_limit_at_the_share_is_notified_once_with_the_account_to_switch_to() {
+        let tools = vec![tool_of(
+            "codex",
+            vec![
+                account("main", true, ok(vec![window("5h", 91.0, Some(600))])),
+                account("team", false, ok(vec![window("5h", 30.0, None)])),
+                account("full", false, ok(vec![window("5h", 95.0, None)])),
+            ],
+        )];
+        let due = near_notices(
+            &tools,
+            90,
+            UseFirst::MostLeft,
+            false,
+            true,
+            &HashSet::new(),
+            NOW,
+        );
+        assert_eq!(due.len(), 1);
+        assert_eq!(
+            (
+                due[0].provider,
+                due[0].from.as_str(),
+                due[0].window.as_str(),
+                due[0].to.as_deref()
+            ),
+            ("codex", "main", "5h", Some("team"))
+        );
+        assert_eq!(due[0].resets_at, Some(NOW + 600));
+        let sent: HashSet<String> = [due[0].key.clone()].into();
+        assert!(near_notices(&tools, 90, UseFirst::MostLeft, false, true, &sent, NOW).is_empty());
+        // Below the share, nothing.
+        assert!(near_notices(
+            &tools,
+            95,
+            UseFirst::MostLeft,
+            false,
+            true,
+            &HashSet::new(),
+            NOW
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn claude_code_is_left_to_the_automatic_switch_and_follows_use_first_otherwise() {
+        let tools = vec![claude(vec![
+            account(
+                "ben1",
+                true,
+                ok(vec![
+                    window("5h", 92.0, Some(600)),
+                    window("week", 40.0, Some(5 * 86_400)),
+                ]),
+            ),
+            account(
+                "ben2",
+                false,
+                ok(vec![
+                    window("5h", 10.0, None),
+                    window("week", 20.0, Some(4 * 86_400)),
+                ]),
+            ),
+            account(
+                "ben3",
+                false,
+                ok(vec![
+                    window("5h", 30.0, None),
+                    window("week", 60.0, Some(86_400)),
+                ]),
+            ),
+        ])];
+        let none = HashSet::new();
+        assert!(near_notices(&tools, 90, UseFirst::MostLeft, true, true, &none, NOW).is_empty());
+        let most = near_notices(&tools, 90, UseFirst::MostLeft, false, true, &none, NOW);
+        assert_eq!(most[0].to.as_deref(), Some("ben2"));
+        let soonest = near_notices(&tools, 90, UseFirst::ResetsSoonest, false, true, &none, NOW);
+        assert_eq!(soonest[0].to.as_deref(), Some("ben3"));
+    }
+
+    #[test]
+    fn a_used_up_limit_is_left_to_the_run_out_notice_unless_nobody_has_room() {
+        let with_room = vec![tool_of(
+            "codex",
+            vec![
+                account("main", true, ok(vec![window("5h", 100.0, Some(600))])),
+                account("team", false, ok(vec![window("5h", 30.0, None)])),
+            ],
+        )];
+        let none = HashSet::new();
+        assert!(
+            near_notices(&with_room, 90, UseFirst::MostLeft, false, true, &none, NOW).is_empty()
+        );
+        assert_eq!(
+            near_notices(&with_room, 90, UseFirst::MostLeft, false, false, &none, NOW).len(),
+            1
+        );
+        let nobody = vec![tool_of(
+            "codex",
+            vec![
+                account("main", true, ok(vec![window("5h", 100.0, Some(600))])),
+                account("team", false, ok(vec![window("5h", 97.0, None)])),
+            ],
+        )];
+        let due = near_notices(&nobody, 90, UseFirst::MostLeft, false, true, &none, NOW);
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].to, None);
+    }
+
+    #[test]
+    fn a_notice_key_says_when_its_limit_resets() {
+        assert_eq!(
+            key_resets(&near_key("codex", "main", "5h", Some(NOW))),
+            Some(NOW)
+        );
+        assert_eq!(key_resets(&near_key("codex", "main", "5h", None)), None);
+        assert_eq!(key_resets("signin|codex|main"), None);
+    }
+
+    #[test]
+    fn resets_first_notices_count_as_spent_for_their_week() {
+        let keys = [
+            resets_first_key("ben3", Some(NOW + 86_400)),
+            near_key("codex", "main", "5h", Some(NOW)),
+        ];
+        let spent = resets_first_spent(keys.iter());
+        assert_eq!(spent, [early_key("ben3", Some(NOW + 86_400))].into());
+    }
+
+    #[test]
+    fn a_refused_login_is_notified_once_and_forgotten_once_it_reads_again() {
+        let refused = vec![claude(vec![
+            account("ben1", true, ok(vec![window("5h", 10.0, None)])),
+            account("ben3", false, Some(UsageView::Unauthorized)),
+        ])];
+        let (due, forget) = sign_in_notices(&refused, &HashSet::new());
+        assert_eq!(due, vec![("claude-code", "ben3".to_string())]);
+        assert!(forget.is_empty());
+        let notified: HashSet<String> = [
+            sign_in_key("claude-code", "ben3"),
+            sign_in_key("claude-code", "gone"),
+        ]
+        .into();
+        let (due, forget) = sign_in_notices(&refused, &notified);
+        assert!(due.is_empty());
+        // An account no longer there is forgotten.
+        assert_eq!(forget, vec![sign_in_key("claude-code", "gone")]);
+        let mended = vec![claude(vec![account(
+            "ben3",
+            false,
+            ok(vec![window("5h", 0.0, None)]),
+        )])];
+        let (_, forget) = sign_in_notices(&mended, &notified);
+        assert!(forget.contains(&sign_in_key("claude-code", "ben3")));
     }
 
     // ---- verify findings

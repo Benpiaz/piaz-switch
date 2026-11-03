@@ -1957,6 +1957,15 @@ function onOpenDialog(request) {
     const tool = toolOf(request.provider);
     const account = tool && tool.accounts.find((a) => a.name === request.name);
     if (tool && account) openConfirmRestart(tool, account, false);
+  } else if (request.kind === "sign-in-again") {
+    // From a notification about a login the service refused.
+    const tool = toolOf(request.provider);
+    const account = tool && tool.accounts.find((a) => a.name === request.name);
+    if (tool && account) {
+      pane = "accounts";
+      render();
+      openSignInAgain(tool, account);
+    }
   }
 }
 
@@ -2129,8 +2138,9 @@ function automationGroups() {
   const threshold = h(
     "select",
     {
-      "aria-label": t("autoSwitchAt"),
-      disabled: !a.autoSwitch,
+      "aria-label": t("shareAt"),
+      // The share serves the automatic switch and the near-limit notices.
+      disabled: !a.autoSwitch && !a.notifyNear,
       onchange: (event) => changeSetting({ autoSwitchAt: Number(event.target.value) }),
     },
     Array.from({ length: 11 }, (_, i) => 50 + i * 5).map((n) => h("option", { value: String(n), selected: n === a.autoSwitchAt }, `${n}%`)),
@@ -2162,8 +2172,8 @@ function automationGroups() {
       ),
       h(
         "div",
-        { class: "setting-row" + (a.autoSwitch ? "" : " muted") },
-        h("div", { class: "setting-name", text: t("autoSwitchAt") }),
+        { class: "setting-row" + (a.autoSwitch || a.notifyNear ? "" : " muted") },
+        h("div", { class: "setting-name", text: t("shareAt") }),
         h("span", { class: "select" }, keyed(threshold, "auto-switch-at")),
       ),
       h(
@@ -2182,6 +2192,12 @@ function automationGroups() {
         { class: "setting-row" },
         h("div", null, h("div", { class: "setting-name", text: t("notifyRunOut") }), h("p", { class: "help", text: t("notifyRunOutHelp") })),
         toggle(a.notifyRunOut, t("notifyRunOut"), () => changeSetting({ notifyRunOut: !a.notifyRunOut }), "notify-run-out"),
+      ),
+      h(
+        "div",
+        { class: "setting-row" },
+        h("div", null, h("div", { class: "setting-name", text: t("notifyNear") }), h("p", { class: "help", text: t("notifyNearHelp") })),
+        toggle(a.notifyNear, t("notifyNear"), () => changeSetting({ notifyNear: !a.notifyNear }), "notify-near"),
       ),
     ),
   );

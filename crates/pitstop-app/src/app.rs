@@ -18,6 +18,8 @@ use tauri_plugin_notification::NotificationExt;
 use crate::duty::{self, WarmStanding};
 use crate::i18n::Lang;
 use crate::model::{self, Snapshot, WarmState};
+use crate::notified::Notified;
+use crate::toast::{self, Act};
 use crate::{renew, settings, warm};
 
 /// How often the app looks whether a warm-up, switch or notice is due.
@@ -51,12 +53,22 @@ struct Automatic {
     /// The last renewal outcome logged per account: a refusal or failure
     /// retried again and again is logged once, not on every try.
     renewals_logged: HashMap<String, &'static str>,
+    /// The notices posted, also before a restart; read on first use.
+    notified: Option<Notified>,
 }
 
 /// How many of this run's switches [`Automatic::switches`] keeps.
 const SWITCHES_KEPT: usize = 100;
 
 impl Automatic {
+    /// The notices posted, read from disk the first time, without those
+    /// whose time has passed.
+    fn notified(&mut self, host: &RealHost, now: i64) -> &mut Notified {
+        let notified = self.notified.get_or_insert_with(|| Notified::load(host));
+        notified.prune(now);
+        notified
+    }
+
     fn switched(&mut self, entry: Entry) {
         if self.switches.len() >= SWITCHES_KEPT {
             self.switches.remove(0);
@@ -421,45 +433,215 @@ fn duties(app: &AppHandle) {
     if settings.auto_switch {
         let plan = claude.and_then(|tool| {
             duty::switch_target(tool, settings.auto_switch_at, settings.use_first, now())
-                .or_else(|| early_plan(app, &host, &snapshot, &settings, tool))
+                .or_else(|| early_plan(app, &host, &snapshot, &settings, tool, &HashSet::new()))
         });
         if let Some(plan) = plan {
             auto_switch(app, &host, lang, &plan);
         }
     }
-    if settings.notify_run_out {
-        let state = app.state::<AppState>();
-        let fresh = {
-            let Ok(mut auto) = state.automatic.lock() else {
-                return;
-            };
-            let fresh =
-                duty::run_out_notices(&snapshot.tools, &snapshot.suggestions, &auto.sent, now());
-            auto.sent.extend(fresh.iter().map(|n| n.key.clone()));
-            fresh
-        };
-        for notice in fresh {
-            notify(
-                app,
-                &lang.ran_out(&notice.from, &lang.window(&notice.window)),
-                &lang.still_has_room(&notice.to),
-            );
-        }
-    }
+    notices(app, &host, &snapshot, &settings, lang, claude);
     if let Some(tool) = claude {
         warm_ups(app, &host, &settings, tool);
     }
 }
 
+/// One notification to post, and the key that keeps it from coming again.
+struct Post {
+    key: String,
+    /// When the key may be forgotten; none keeps it until told otherwise.
+    until: Option<i64>,
+    title: String,
+    body: String,
+    button: Option<(String, Act)>,
+    tap: Act,
+}
+
+/// The notifications the last reading calls for, each posted once, also
+/// across restarts: an account in use out of a limit, or at the share of one
+/// for a tool not switched by itself, another account whose week resets
+/// first, and a login the service no longer takes.
+fn notices(
+    app: &AppHandle,
+    host: &RealHost,
+    snapshot: &Snapshot,
+    settings: &settings::Settings,
+    lang: Lang,
+    claude: Option<&model::ToolView>,
+) {
+    let at = now();
+    let state = app.state::<AppState>();
+    // What was posted is read under the lock; the rest is judged without it.
+    let (sent, notified) = {
+        let Ok(mut auto) = state.automatic.lock() else {
+            return;
+        };
+        let notified = auto.notified(host, at).keys();
+        let mut sent = auto.sent.clone();
+        sent.extend(notified.iter().cloned());
+        (sent, notified)
+    };
+    let tool_name = |id: &str| {
+        ProviderId::parse(id)
+            .map(|p| p.display_name())
+            .unwrap_or_default()
+    };
+    let mut posts = Vec::new();
+
+    if settings.notify_run_out {
+        for notice in duty::run_out_notices(&snapshot.tools, &snapshot.suggestions, &sent, at) {
+            let Ok(provider) = ProviderId::parse(notice.provider) else {
+                continue;
+            };
+            posts.push(Post {
+                until: Notified::until(duty::key_resets(&notice.key), at),
+                key: notice.key,
+                title: lang.ran_out(&notice.from, &lang.window(&notice.window)),
+                body: lang.still_has_room(&notice.to),
+                button: Some((
+                    lang.switch_to(&notice.to),
+                    Act::Switch {
+                        provider,
+                        name: notice.to,
+                    },
+                )),
+                tap: Act::Open,
+            });
+        }
+    }
+
+    if settings.notify_near {
+        for notice in duty::near_notices(
+            &snapshot.tools,
+            settings.auto_switch_at,
+            settings.use_first,
+            settings.auto_switch,
+            settings.notify_run_out,
+            &sent,
+            at,
+        ) {
+            let Ok(provider) = ProviderId::parse(notice.provider) else {
+                continue;
+            };
+            let window = lang.window(&notice.window);
+            let resets_in = notice
+                .resets_at
+                .filter(|&r| r > at)
+                .map(|r| crate::i18n::duration(r - at));
+            posts.push(Post {
+                until: Notified::until(notice.resets_at, at),
+                title: lang.near_title(
+                    tool_name(notice.provider),
+                    &window,
+                    notice.percent >= 100.0,
+                ),
+                body: lang.near_body(
+                    &notice.from,
+                    notice.percent,
+                    &window,
+                    notice.to.as_deref(),
+                    resets_in.as_deref(),
+                ),
+                button: notice
+                    .to
+                    .map(|to| (lang.switch_to(&to), Act::Switch { provider, name: to })),
+                key: notice.key,
+                tap: Act::Open,
+            });
+        }
+        // Under "week that resets first" with no automatic switch, the
+        // switch it would have made before the share is offered instead,
+        // once per account and week.
+        if !settings.auto_switch && settings.use_first == duty::UseFirst::ResetsSoonest {
+            let posted = duty::resets_first_spent(notified.iter());
+            let plan =
+                claude.and_then(|tool| early_plan(app, host, snapshot, settings, tool, &posted));
+            if let Some((plan, early)) = plan.and_then(|p| p.early.map(|e| (p, e))) {
+                let key = duty::resets_first_key(&plan.to, early.to_resets);
+                if !sent.contains(&key) {
+                    posts.push(Post {
+                        key,
+                        until: Some(early.to_resets.unwrap_or(at + duty::PERIOD)),
+                        title: lang.resets_first_title().into(),
+                        body: lang.resets_first_body(
+                            &plan.from,
+                            &plan.to,
+                            early.to_resets.map(|r| week_clock(lang, r)).as_deref(),
+                            early.from_resets.map(|r| week_clock(lang, r)).as_deref(),
+                        ),
+                        button: Some((
+                            lang.switch_to(&plan.to),
+                            Act::Switch {
+                                provider: ProviderId::ClaudeCode,
+                                name: plan.to,
+                            },
+                        )),
+                        tap: Act::Open,
+                    });
+                }
+            }
+        }
+    }
+
+    // A refused login is news whatever else is chosen: until it is signed
+    // in again, the account can't be switched to.
+    let (refused, mended) = duty::sign_in_notices(&snapshot.tools, &notified);
+    for (provider, name) in refused {
+        let Ok(pid) = ProviderId::parse(provider) else {
+            continue;
+        };
+        let again = Act::SignInAgain {
+            provider: pid,
+            name: name.clone(),
+        };
+        posts.push(Post {
+            key: duty::sign_in_key(provider, &name),
+            until: None,
+            title: lang.sign_in_lost_title().into(),
+            body: lang.sign_in_lost_body(pid.display_name(), &name),
+            button: Some((lang.sign_in_again().into(), again.clone())),
+            tap: again,
+        });
+    }
+
+    if posts.is_empty() && mended.is_empty() {
+        return;
+    }
+    {
+        let Ok(mut auto) = state.automatic.lock() else {
+            return;
+        };
+        for post in &posts {
+            auto.sent.insert(post.key.clone());
+        }
+        let notified = auto.notified(host, at);
+        for key in &mended {
+            notified.remove(key);
+        }
+        for post in &posts {
+            notified.insert(post.key.clone(), post.until);
+        }
+        notified.save(host);
+    }
+    for post in posts {
+        let button = post
+            .button
+            .as_ref()
+            .map(|(label, act)| (label.as_str(), act.clone()));
+        toast::post(app, &post.title, &post.body, button, post.tap);
+    }
+}
+
 /// A switch before the threshold to the account whose week resets first,
 /// when that order is chosen: only on a recent reading, and not within a few
-/// minutes of any switch, from here or from the command line.
+/// minutes of any switch, from here or from the command line. `also_spent`
+/// holds more accounts to leave out, by [`duty::early_key`].
 fn early_plan(
     app: &AppHandle,
     host: &RealHost,
     snapshot: &Snapshot,
     settings: &settings::Settings,
     tool: &model::ToolView,
+    also_spent: &HashSet<String>,
 ) -> Option<duty::SwitchPlan> {
     if settings.use_first != duty::UseFirst::ResetsSoonest {
         return None;
@@ -488,7 +670,8 @@ fn early_plan(
     if activity::last_switch_at(&log).is_some_and(|last| at - last < duty::EARLY_QUIET) {
         return None;
     }
-    let spent = duty::early_spent(&log, tool, at);
+    let mut spent = duty::early_spent(&log, tool, at);
+    spent.extend(also_spent.iter().cloned());
     duty::early_target(tool, settings.auto_switch_at, &spent, at)
 }
 
@@ -548,7 +731,19 @@ fn auto_switch(app: &AppHandle, host: &RealHost, lang: Lang, plan: &duty::Switch
                 ),
                 None => lang.auto_switched_why(&plan.from, plan.percent, &lang.window(&plan.limit)),
             };
-            notify(app, &title, &why);
+            // Undoes this switch only while the account switched to is in use.
+            let back = Act::SwitchBack {
+                provider: ProviderId::ClaudeCode,
+                from: plan.to.clone(),
+                to: plan.from.clone(),
+            };
+            toast::post(
+                app,
+                &title,
+                &why,
+                Some((lang.switch_back(), back)),
+                Act::Open,
+            );
             let _ = app.emit(
                 "auto-switched",
                 serde_json::json!({ "provider": done.provider, "name": done.name, "title": title, "why": why }),

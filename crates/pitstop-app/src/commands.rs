@@ -458,6 +458,9 @@ pub async fn quit(app: AppHandle) {
 
 /// Automatic switch, run-out notices and the warm-up span; what is left out
 /// stays as it is.
+// Each setting is an argument of its own, so the window sends only those
+// it changes, by name.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn set_automation(
     app: AppHandle,
@@ -465,6 +468,7 @@ pub async fn set_automation(
     auto_switch_at: Option<u8>,
     use_first: Option<crate::duty::UseFirst>,
     notify_run_out: Option<bool>,
+    notify_near: Option<bool>,
     warm_from: Option<String>,
     warm_to: Option<String>,
 ) -> Answer<()> {
@@ -482,6 +486,9 @@ pub async fn set_automation(
         }
         if let Some(on) = notify_run_out {
             saved.notify_run_out = on;
+        }
+        if let Some(on) = notify_near {
+            saved.notify_near = on;
         }
         let clock = |c: &String| crate::duty::is_clock(c);
         if let Some(from) = warm_from.filter(clock) {
