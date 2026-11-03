@@ -46,6 +46,16 @@ pub struct AccountUsage {
     pub report: UsageReport,
 }
 
+/// What renewing one parked login came to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Renewal {
+    Renewed,
+    /// The login can't be renewed: Anthropic no longer takes its refresh
+    /// token, or it holds none. Only signing in again mends it.
+    Refused,
+    Failed(String),
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum RemoveOutcome {
     Removed,
@@ -436,6 +446,72 @@ impl<H: Host> Engine<H> {
                 .collect()
         });
         Ok(read)
+    }
+
+    /// Renew each parked Claude Code login whose access token has lapsed, or
+    /// is about to, as Claude Code would: its refresh token buys new tokens,
+    /// which go back in the vault. Otherwise its usage could not be read until
+    /// a switch or a warm-up renewed it, hours later.
+    ///
+    /// Only parked logins: the vault alone holds them, so nobody renews the
+    /// same chain meanwhile. The live login is Claude Code's to renew: its
+    /// owner is left alone, and so is any parked copy holding its refresh
+    /// token, whoever that copy says it belongs to. When the live login can't
+    /// be read nothing is renewed, since it may be any of them. A lapsed login
+    /// holding nothing to renew it with is [`Renewal::Refused`].
+    /// `wanted` picks the lapsed accounts to try. The caller keeps switches
+    /// out while this runs: a switch would put in use a login being renewed.
+    pub fn renew_parked(
+        &self,
+        api: &dyn UsageApi,
+        wanted: &dyn Fn(&str) -> bool,
+    ) -> Result<Vec<(String, Renewal)>> {
+        let provider = ProviderId::ClaudeCode;
+        let state = State::load(&self.host)?;
+        let (in_use, live_chain) = match provider_for(provider).read_active(&self.host)? {
+            Some(current) => (
+                live::owner(&state, provider, &current.details),
+                usage::claude_refresh_token(&current.blob),
+            ),
+            None => (None, None),
+        };
+        let mut renewed = Vec::new();
+        for meta in state.accounts.iter().filter(|a| a.provider == provider) {
+            if in_use.as_deref() == Some(meta.name.as_str()) || !wanted(&meta.name) {
+                continue;
+            }
+            let id = vault_id(provider, &meta.name);
+            let Ok(blob) = vault::load(&self.host, &id) else {
+                continue;
+            };
+            if live_chain.is_some() && usage::claude_refresh_token(&blob) == live_chain {
+                continue;
+            }
+            let Some(renewal) =
+                usage::claude_renewal(&blob, now_epoch() as i64, usage::RENEW_AHEAD)
+            else {
+                if matches!(
+                    usage::claude_token(&blob, now_epoch() as i64),
+                    Token::Expired
+                ) {
+                    renewed.push((meta.name.clone(), Renewal::Refused));
+                }
+                continue;
+            };
+            let outcome = match api.renew_claude(&renewal) {
+                Ok(answer) => match usage::claude_renewed(&blob, &answer, now_epoch() as i64) {
+                    Some(blob) => match vault::store(&self.host, &id, &blob) {
+                        Ok(()) => Renewal::Renewed,
+                        Err(e) => Renewal::Failed(format!("couldn't keep the renewed login: {e}")),
+                    },
+                    None => Renewal::Failed("Anthropic's answer held no new token".into()),
+                },
+                Err(usage::FetchError::Unauthorized) => Renewal::Refused,
+                Err(usage::FetchError::Other(why)) => Renewal::Failed(why),
+            };
+            renewed.push((meta.name.clone(), outcome));
+        }
+        Ok(renewed)
     }
 
     /// Where a [`Engine::usage`] read names the plan (Cursor's does), record
@@ -1295,6 +1371,211 @@ mod tests {
                 "planInfo": {"planName": "Plus"}
             }))
         }
+
+        fn renew_claude(
+            &self,
+            renewal: &usage::ClaudeRenewal,
+        ) -> std::result::Result<serde_json::Value, usage::FetchError> {
+            let refresh = &renewal.refresh_token;
+            self.seen.lock().unwrap().push(format!("renew|{refresh}"));
+            if refresh == "SECRET-RT-DEAD" {
+                return Err(usage::FetchError::Unauthorized);
+            }
+            Ok(serde_json::json!({
+                "access_token": format!("{refresh}-NEW-AT"),
+                "refresh_token": format!("{refresh}-NEW-RT"),
+                "expires_in": 28_800
+            }))
+        }
+    }
+
+    /// Claude Code's credentials for a login whose access token lapses at
+    /// `expires_at` (epoch seconds), renewed with `refresh`.
+    fn lapsing_creds(token: &str, refresh: &str, expires_at: i64) -> String {
+        serde_json::json!({"claudeAiOauth": {
+            "accessToken": token,
+            "refreshToken": refresh,
+            "expiresAt": expires_at * 1000,
+            "scopes": ["user:inference", "user:profile"]
+        }})
+        .to_string()
+    }
+
+    fn parked_token(engine: &Engine<FakeHost>, name: &str) -> Option<String> {
+        let blob = vault::load(engine.host(), &vault_id(ProviderId::ClaudeCode, name)).unwrap();
+        match usage::claude_token(&blob, now_epoch() as i64) {
+            Token::Valid(token) => Some(token),
+            _ => None,
+        }
+    }
+
+    /// "work" parked and "personal" in use, both with tokens that lapsed an
+    /// hour ago; "work" renews with `work_refresh`.
+    fn parked_and_in_use_lapsed(work_refresh: &str) -> Engine<FakeHost> {
+        let lapsed = now_epoch() as i64 - 3_600;
+        let host = FakeHost::new();
+        host.put_file(
+            ClaudeCode::credentials_path(&host),
+            lapsing_creds(TOKEN_A, work_refresh, lapsed),
+        );
+        host.put_file(ClaudeCode::config_path(&host), config("a@x.com"));
+        let engine = Engine::new(host);
+        engine.enroll(ProviderId::ClaudeCode, "work").unwrap();
+        engine.host().put_file(
+            ClaudeCode::credentials_path(engine.host()),
+            lapsing_creds(TOKEN_B, "SECRET-RT-B", lapsed),
+        );
+        engine
+            .host()
+            .put_file(ClaudeCode::config_path(engine.host()), config("b@x.com"));
+        engine.enroll(ProviderId::ClaudeCode, "personal").unwrap();
+        engine
+    }
+
+    #[test]
+    fn a_parked_login_whose_token_lapsed_is_renewed_and_the_one_in_use_never() {
+        let engine = parked_and_in_use_lapsed("SECRET-RT-A");
+        let live_before = active_token(engine.host());
+
+        let api = FakeApi::new();
+        let renewed = engine.renew_parked(&api, &|_| true).unwrap();
+
+        assert_eq!(renewed, [("work".to_owned(), Renewal::Renewed)]);
+        assert_eq!(api.seen.lock().unwrap().as_slice(), ["renew|SECRET-RT-A"]);
+        assert_eq!(
+            parked_token(&engine, "work").as_deref(),
+            Some("SECRET-RT-A-NEW-AT")
+        );
+        // Claude Code's own login, and the vault copy of it, are left alone.
+        assert_eq!(active_token(engine.host()), live_before);
+        assert_eq!(parked_token(&engine, "personal"), None);
+
+        // Renewed, it reads; and it isn't renewed again.
+        let all = engine.usage(&api).unwrap();
+        assert_eq!(report_for(&all, "personal"), &UsageReport::Expired);
+        assert!(api
+            .seen
+            .lock()
+            .unwrap()
+            .contains(&"SECRET-RT-A-NEW-AT".to_owned()));
+        assert!(engine.renew_parked(&api, &|_| true).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_refused_renewal_leaves_the_parked_login_as_it_was() {
+        let engine = parked_and_in_use_lapsed("SECRET-RT-DEAD");
+        let before = vault::load(engine.host(), &vault_id(ProviderId::ClaudeCode, "work")).unwrap();
+
+        let renewed = engine.renew_parked(&FakeApi::new(), &|_| true).unwrap();
+
+        assert_eq!(renewed, [("work".to_owned(), Renewal::Refused)]);
+        assert_eq!(
+            vault::load(engine.host(), &vault_id(ProviderId::ClaudeCode, "work")).unwrap(),
+            before
+        );
+    }
+
+    #[test]
+    fn nothing_is_renewed_while_the_live_login_cannot_be_read() {
+        let engine = parked_and_in_use_lapsed("SECRET-RT-A");
+        engine
+            .host()
+            .put_file(ClaudeCode::config_path(engine.host()), "{not json");
+
+        let api = FakeApi::new();
+        assert!(engine.renew_parked(&api, &|_| true).is_err());
+        assert!(api.seen.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn with_claude_code_signed_out_every_lapsed_login_is_parked_and_renewed() {
+        let engine = parked_and_in_use_lapsed("SECRET-RT-A");
+        engine
+            .host()
+            .remove_file(&ClaudeCode::credentials_path(engine.host()))
+            .unwrap();
+
+        let mut renewed = engine.renew_parked(&FakeApi::new(), &|_| true).unwrap();
+        renewed.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(
+            renewed,
+            [
+                ("personal".to_owned(), Renewal::Renewed),
+                ("work".to_owned(), Renewal::Renewed)
+            ]
+        );
+    }
+
+    #[test]
+    fn a_parked_copy_of_the_live_chain_is_never_renewed_whoever_it_says_it_is() {
+        let engine = parked_and_in_use_lapsed("SECRET-RT-A");
+        // Claude Code now holds work's chain under an identity nobody owns.
+        let lapsed = now_epoch() as i64 - 3_600;
+        engine.host().put_file(
+            ClaudeCode::credentials_path(engine.host()),
+            lapsing_creds(TOKEN_A, "SECRET-RT-A", lapsed),
+        );
+        engine
+            .host()
+            .put_file(ClaudeCode::config_path(engine.host()), config("c@x.com"));
+
+        let api = FakeApi::new();
+        let renewed = engine.renew_parked(&api, &|_| true).unwrap();
+        assert_eq!(renewed, [("personal".to_owned(), Renewal::Renewed)]);
+        assert_eq!(api.seen.lock().unwrap().as_slice(), ["renew|SECRET-RT-B"]);
+    }
+
+    #[test]
+    fn a_lapsed_login_with_nothing_to_renew_it_needs_signing_in_again() {
+        let lapsed = now_epoch() as i64 - 3_600;
+        let host = FakeHost::new();
+        host.put_file(
+            ClaudeCode::credentials_path(&host),
+            serde_json::json!({"claudeAiOauth": {
+                "accessToken": TOKEN_A, "expiresAt": lapsed * 1000
+            }})
+            .to_string(),
+        );
+        host.put_file(ClaudeCode::config_path(&host), config("a@x.com"));
+        let engine = Engine::new(host);
+        engine.enroll(ProviderId::ClaudeCode, "work").unwrap();
+        sign_in_as(engine.host(), TOKEN_B, "b@x.com");
+        engine.enroll(ProviderId::ClaudeCode, "personal").unwrap();
+
+        let api = FakeApi::new();
+        let renewed = engine.renew_parked(&api, &|_| true).unwrap();
+        assert_eq!(renewed, [("work".to_owned(), Renewal::Refused)]);
+        assert!(api.seen.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn only_the_wanted_lapsed_logins_are_renewed() {
+        let engine = parked_and_in_use_lapsed("SECRET-RT-A");
+        let api = FakeApi::new();
+        assert!(engine
+            .renew_parked(&api, &|name| name != "work")
+            .unwrap()
+            .is_empty());
+        assert!(api.seen.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_parked_token_still_good_for_a_while_is_not_renewed() {
+        let later = now_epoch() as i64 + 3_600;
+        let host = FakeHost::new();
+        host.put_file(
+            ClaudeCode::credentials_path(&host),
+            lapsing_creds(TOKEN_A, "SECRET-RT-A", later),
+        );
+        host.put_file(ClaudeCode::config_path(&host), config("a@x.com"));
+        let engine = Engine::new(host);
+        engine.enroll(ProviderId::ClaudeCode, "work").unwrap();
+        sign_in_as(engine.host(), TOKEN_B, "b@x.com");
+        engine.enroll(ProviderId::ClaudeCode, "personal").unwrap();
+
+        let api = FakeApi::new();
+        assert!(engine.renew_parked(&api, &|_| true).unwrap().is_empty());
+        assert!(api.seen.lock().unwrap().is_empty());
     }
 
     fn report_for<'a>(all: &'a [AccountUsage], name: &str) -> &'a UsageReport {

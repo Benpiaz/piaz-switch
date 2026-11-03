@@ -17,7 +17,7 @@ use tauri_plugin_notification::NotificationExt;
 use crate::duty::{self, WarmStanding};
 use crate::i18n::Lang;
 use crate::model::{self, Snapshot, WarmState};
-use crate::{settings, warm};
+use crate::{renew, settings, warm};
 
 /// How often the app looks whether a warm-up, switch or notice is due.
 const DUTIES_EVERY: Duration = Duration::from_secs(60);
@@ -54,6 +54,7 @@ struct Inner {
     installed: Vec<(ProviderId, bool)>,
     snapshot: Option<Snapshot>,
     warm: Vec<WarmState>,
+    renewals: renew::Failures,
 }
 
 /// Where Pitstop keeps its state: the home directory, or `PITSTOP_HOME` to
@@ -209,12 +210,35 @@ fn follow(app: &AppHandle, plan: duty::ReadPlan) {
     }
 }
 
+/// Renew the parked Claude Code logins whose token has lapsed, so the read
+/// that follows can read them; switches wait meanwhile.
+fn renew_parked(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    // Never `inner` held while waiting for `ops`.
+    let failures = match state.inner.lock() {
+        Ok(inner) => inner.renewals.clone(),
+        Err(_) => return,
+    };
+    let at = now();
+    let renewed = {
+        let _op = state.ops.lock();
+        engine().renew_parked(&Http::new(), &|name| failures.due(name, at))
+    };
+    let Ok(renewed) = renewed else {
+        return;
+    };
+    if let Ok(mut inner) = state.inner.lock() {
+        inner.renewals.note(&renewed, now());
+    };
+}
+
 /// Read every account's usage, off the calling thread.
 fn start_read(app: &AppHandle) {
     let app = app.clone();
     std::thread::spawn(move || {
         refresh(&app);
         // However the read ends, the next one may start.
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| renew_parked(&app)));
         let read_now = std::panic::catch_unwind(|| engine().usage(&Http::new()));
         if let Ok(Ok(read)) = &read_now {
             // Recording a plan the read names is a change like any other.
@@ -228,6 +252,7 @@ fn start_read(app: &AppHandle) {
                 return;
             };
             if let Ok(Ok(usage)) = read_now {
+                let usage = inner.renewals.mark_refused(usage);
                 let (usage, updated_at) =
                     duty::merge_read(&inner.usage, inner.updated_at, usage, now());
                 inner.usage = usage;

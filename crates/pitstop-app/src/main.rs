@@ -9,6 +9,7 @@ mod duty;
 mod i18n;
 mod links;
 mod model;
+mod renew;
 mod settings;
 mod signin;
 mod spend;

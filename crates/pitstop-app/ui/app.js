@@ -839,9 +839,8 @@ function notesOf(tool, account) {
   const usage = account.usage;
   const warm = warmOf(tool, account);
   if (usage && usage.status === "expired" && !account.inUse) {
-    // Only a warm-up that is still going to run renews the token.
-    const stuck = warm && warm.standing && ["loginExpired", "loginRefused", "gaveUp"].includes(warm.standing.state);
-    const text = warm && !stuck ? t("tokenExpiredWarm") : t("tokenExpired", { tool: tool.name });
+    // A parked Claude Code login is renewed before a read; the other tools renew theirs once switched to.
+    const text = tool.id === "claude-code" ? t("tokenExpiredRenew") : t("tokenExpired", { tool: tool.name });
     chips.push(h("span", { class: "chip" }, icon("clock"), h("span", { text })));
   }
   if (usage && usage.status === "unauthorized") chips.push(h("span", { class: "chip warn" }, icon("warning"), h("span", { text: t("unauthorized") })));

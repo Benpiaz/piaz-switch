@@ -278,9 +278,13 @@ Antigravity's is not asked for at all: it is the per-model quota Antigravity
 itself last read and kept with the login, so a parked account shows its quota as of
 when it was last in use (a limit past its reset time shows as reset).
 
-Piaz Switch never refreshes a token to read usage: renewing rotates the refresh token,
-and two holders renewing one chain breaks it for both. A parked account whose access
-token has lapsed shows as expired until you switch to it and the tool renews it.
+Piaz Switch never refreshes the login a tool is using: renewing rotates the refresh
+token, and two holders renewing one chain breaks it for both. A parked Claude Code
+login is held by Piaz Switch alone, so when its access token lapses (about 8 hours
+after Claude Code last renewed it) Piaz Switch renews it the way Claude Code would,
+before the next read, and its limits keep showing. One Anthropic no longer renews
+asks you to sign in again. A parked Codex or Cursor account whose access token has
+lapsed shows as expired until you switch to it and the tool renews it.
 
 ### Cost and tokens (the Usage pane)
 

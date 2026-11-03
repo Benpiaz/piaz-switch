@@ -298,8 +298,8 @@ pub fn warm_standing(
         // The reading of the account in use is made with Claude Code's own
         // login, which Claude Code renews when it runs.
         Some(UsageView::Expired) if account.in_use => return WarmStanding::Renewing,
-        // A parked login can't be read until renewed, and the warm-up renews
-        // it: its limits are learnt after.
+        // A parked login can't be read until renewed: before a read, or by
+        // the warm-up. Its limits are learnt after.
         Some(UsageView::Expired) if login_expired => return WarmStanding::LoginExpired,
         Some(UsageView::Expired) => None,
         Some(UsageView::Unauthorized) => return WarmStanding::LoginRefused,

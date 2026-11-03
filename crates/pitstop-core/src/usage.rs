@@ -8,10 +8,13 @@
 //! - Antigravity: not asked at all. The quota is the one Antigravity itself
 //!   last read and kept with the login (see `provider::antigravity::quota`).
 //!
-//! Pitstop never refreshes a token to read usage. Refreshing rotates the
-//! refresh token, and the live login is the tool's to renew — two holders
-//! renewing one chain would break it for both. An account whose access token
-//! has lapsed shows as expired until it is switched to and the tool renews it.
+//! Pitstop never refreshes a live login. Refreshing rotates the refresh
+//! token, and the live login is the tool's to renew — two holders renewing
+//! one chain would break it for both. A parked Claude Code login has one
+//! holder, the vault, so Pitstop renews it the way Claude Code would once its
+//! access token lapses (see `Engine::renew_parked`), and its usage can still
+//! be read. Any other parked account whose access token has lapsed shows as
+//! expired until it is switched to and the tool renews it.
 
 use std::time::Duration;
 
@@ -22,6 +25,12 @@ pub const CODEX_USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
 pub const CURSOR_USAGE_URL: &str =
     "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage";
 pub const CURSOR_PLAN_URL: &str = "https://api2.cursor.sh/aiserver.v1.DashboardService/GetPlanInfo";
+/// Where Claude Code renews its login, and the client it signs in as.
+pub const CLAUDE_TOKEN_URL: &str = "https://platform.claude.com/v1/oauth/token";
+const CLAUDE_CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
+/// How long before its access token lapses a parked login is renewed, so a
+/// read every few minutes never finds it lapsed.
+pub const RENEW_AHEAD: i64 = 5 * 60;
 
 /// One rate-limit window, e.g. the five-hour session or the weekly limit.
 #[derive(Debug, Clone, PartialEq)]
@@ -88,6 +97,10 @@ pub trait UsageApi: Sync {
     /// Cursor's answer for its access token: this billing period's use,
     /// with the plan's `planInfo` beside it when that could be read.
     fn cursor(&self, access_token: &str) -> Result<Value, FetchError>;
+    /// Anthropic's new tokens for a Claude Code login, asked with its refresh
+    /// token as Claude Code asks; a refresh token it no longer takes is
+    /// [`FetchError::Unauthorized`].
+    fn renew_claude(&self, renewal: &ClaudeRenewal) -> Result<Value, FetchError>;
 }
 
 /// Anthropic and OpenAI over the network.
@@ -188,6 +201,48 @@ impl UsageApi for Http {
         }
         Ok(body)
     }
+
+    /// Asked once, never twice: an answer lost on the way back may already
+    /// have used the refresh token up.
+    fn renew_claude(&self, renewal: &ClaudeRenewal) -> Result<Value, FetchError> {
+        let body = serde_json::json!({
+            "grant_type": "refresh_token",
+            "refresh_token": renewal.refresh_token,
+            "client_id": renewal.client_id,
+            "scope": renewal.scopes,
+        })
+        .to_string();
+        let mut response = self
+            .agent
+            .post(CLAUDE_TOKEN_URL)
+            .header("Content-Type", "application/json")
+            .send(body)
+            .map_err(|e| FetchError::Other(format!("{NETWORK}{e}")))?;
+        let status = response.status().as_u16();
+        if status == 200 {
+            return answer(Ok(response), "Anthropic");
+        }
+        let said = response
+            .body_mut()
+            .read_to_string()
+            .ok()
+            .and_then(|body| serde_json::from_str::<Value>(&body).ok());
+        Err(renewal_refused(status, said.as_ref()))
+    }
+}
+
+/// What a renewal Anthropic answered with `status` (not 200) and `said`
+/// came to. Only `invalid_grant` says the refresh token is no longer taken;
+/// any other refusal (a wrong client, a scope) is no reason to sign in again.
+fn renewal_refused(status: u16, said: Option<&Value>) -> FetchError {
+    match (status, said.and_then(|s| s.get("error")?.as_str())) {
+        (400 | 401, Some("invalid_grant")) => FetchError::Unauthorized,
+        (429, _) => FetchError::Other(RATE_LIMITED.into()),
+        (status, error) => FetchError::Other(format!(
+            "Anthropic answered {status}{}",
+            error.map(|e| format!(" ({e})")).unwrap_or_default()
+        )),
+    }
 }
 
 /// The access token inside a claude-code vault blob. Deliberately not `Debug`.
@@ -214,6 +269,98 @@ pub(crate) fn claude_token(blob: &[u8], now_secs: i64) -> Token {
         Some(expires_ms) if expires_ms / 1000 <= now_secs => Token::Expired,
         _ => Token::Valid(token.to_owned()),
     }
+}
+
+/// What renews a Claude Code login: its refresh token, the scopes it was
+/// granted and the client it was issued to. Deliberately not `Debug`.
+pub struct ClaudeRenewal {
+    pub refresh_token: String,
+    /// Space-separated, as the request sends them.
+    pub scopes: String,
+    pub client_id: String,
+}
+
+/// The `claudeAiOauth` inside a claude-code vault blob.
+fn claude_oauth(blob: &[u8]) -> Option<Value> {
+    let blob = serde_json::from_slice::<Value>(blob).ok()?;
+    let credentials = serde_json::from_str::<Value>(blob.get("credentials")?.as_str()?).ok()?;
+    credentials.get("claudeAiOauth").cloned()
+}
+
+/// The refresh token of a claude-code blob: two logins holding the same one
+/// are one chain, whoever they say they belong to.
+pub(crate) fn claude_refresh_token(blob: &[u8]) -> Option<String> {
+    claude_oauth(blob)?
+        .get("refreshToken")?
+        .as_str()
+        .filter(|t| !t.is_empty())
+        .map(str::to_owned)
+}
+
+/// What renews the login in a claude-code blob, when its access token has
+/// lapsed or lapses within `ahead` seconds of `now_secs` and the login holds
+/// a refresh token and its scopes. A token without an expiry never lapses.
+pub(crate) fn claude_renewal(blob: &[u8], now_secs: i64, ahead: i64) -> Option<ClaudeRenewal> {
+    let oauth = claude_oauth(blob)?;
+    let expires_ms = oauth.get("expiresAt").and_then(Value::as_i64)?;
+    if expires_ms / 1000 > now_secs + ahead {
+        return None;
+    }
+    let refresh_token = oauth.get("refreshToken")?.as_str()?.to_owned();
+    let scopes: Vec<&str> = oauth
+        .get("scopes")?
+        .as_array()?
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    if refresh_token.is_empty() || scopes.is_empty() {
+        return None;
+    }
+    let client_id = oauth
+        .get("clientId")
+        .and_then(Value::as_str)
+        .unwrap_or(CLAUDE_CLIENT_ID)
+        .to_owned();
+    Some(ClaudeRenewal {
+        refresh_token,
+        scopes: scopes.join(" "),
+        client_id,
+    })
+}
+
+/// `blob` holding the tokens of Anthropic's `answer` to a renewal at
+/// `now_secs`, as Claude Code keeps them: the new access token and when it
+/// lapses, the new refresh token (the old one when none came) and the scopes
+/// granted. All else in the blob stays. An answer without a lifetime is
+/// still kept, taken as good for an hour: the refresh token it carries may
+/// be the only one left. `None` when the answer lacks a token.
+pub(crate) fn claude_renewed(blob: &[u8], answer: &Value, now_secs: i64) -> Option<Vec<u8>> {
+    const LIFETIME_UNSAID: i64 = 3_600;
+    let access_token = answer.get("access_token")?.as_str()?;
+    let lifetime = answer
+        .get("expires_in")
+        .and_then(Value::as_i64)
+        .unwrap_or(LIFETIME_UNSAID);
+    let mut blob = serde_json::from_slice::<Value>(blob).ok()?;
+    let mut credentials = serde_json::from_str::<Value>(blob.get("credentials")?.as_str()?).ok()?;
+    let oauth = credentials.get_mut("claudeAiOauth")?.as_object_mut()?;
+    oauth.insert("accessToken".into(), access_token.into());
+    oauth.insert(
+        "expiresAt".into(),
+        (now_secs.saturating_add(lifetime).saturating_mul(1000)).into(),
+    );
+    if let Some(refresh_token) = answer.get("refresh_token").and_then(Value::as_str) {
+        oauth.insert("refreshToken".into(), refresh_token.into());
+    }
+    if let Some(scope) = answer.get("scope").and_then(Value::as_str) {
+        let scopes: Vec<Value> = scope.split_whitespace().map(Value::from).collect();
+        if !scopes.is_empty() {
+            oauth.insert("scopes".into(), scopes.into());
+        }
+    }
+    blob.as_object_mut()?
+        .insert("credentials".into(), credentials.to_string().into());
+    serde_json::to_vec(&blob).ok()
 }
 
 /// The access token and ChatGPT account id inside a codex vault blob, which
@@ -948,5 +1095,145 @@ mod tests {
         ));
         assert!(matches!(claude_token(&blob(None), now), Token::Valid(_)));
         assert!(matches!(claude_token(b"{}", now), Token::Missing));
+    }
+
+    /// A parked login as the vault keeps it, with what Claude Code keeps
+    /// beside the tokens.
+    fn login(oauth: Value) -> Vec<u8> {
+        let creds = json!({"claudeAiOauth": oauth, "mcpOAuth": {"kept": true}}).to_string();
+        serde_json::to_vec(
+            &json!({"credentials": creds, "oauth_account": {"emailAddress": "a@x.com"}}),
+        )
+        .unwrap()
+    }
+
+    fn lapsing_at(expires_at_secs: i64) -> Value {
+        json!({
+            "accessToken": "SECRET-AT",
+            "refreshToken": "SECRET-RT",
+            "expiresAt": expires_at_secs * 1000,
+            "scopes": ["user:inference", "user:profile"],
+            "subscriptionType": "team",
+            "rateLimitTier": "default_claude_max_5x"
+        })
+    }
+
+    #[test]
+    fn a_login_is_renewed_once_its_token_lapses_or_is_about_to() {
+        let now = 1_800_000_000;
+        let renewal = |oauth: Value| claude_renewal(&login(oauth), now, RENEW_AHEAD);
+
+        assert!(renewal(lapsing_at(now + RENEW_AHEAD + 60)).is_none());
+        let soon = renewal(lapsing_at(now + 60)).expect("about to lapse");
+        assert_eq!(soon.refresh_token, "SECRET-RT");
+        assert_eq!(soon.scopes, "user:inference user:profile");
+        assert_eq!(soon.client_id, CLAUDE_CLIENT_ID);
+        assert!(renewal(lapsing_at(now - 3_600)).is_some());
+
+        let mut own_client = lapsing_at(now - 1);
+        own_client["clientId"] = json!("another-client");
+        assert_eq!(renewal(own_client).unwrap().client_id, "another-client");
+    }
+
+    #[test]
+    fn a_login_without_what_renews_it_is_not_renewed() {
+        let now = 1_800_000_000;
+        let without = |key: &str| {
+            let mut oauth = lapsing_at(now - 1);
+            oauth.as_object_mut().unwrap().remove(key);
+            claude_renewal(&login(oauth), now, RENEW_AHEAD)
+        };
+        assert!(without("refreshToken").is_none());
+        assert!(without("scopes").is_none());
+        // No expiry is a token that never lapses.
+        assert!(without("expiresAt").is_none());
+        assert!(claude_renewal(b"{}", now, RENEW_AHEAD).is_none());
+    }
+
+    fn oauth_of(blob: &[u8]) -> Value {
+        claude_oauth(blob).unwrap()
+    }
+
+    #[test]
+    fn a_renewed_login_holds_the_new_tokens_and_keeps_the_rest() {
+        let now = 1_800_000_000;
+        let old = login(lapsing_at(now - 60));
+        let answer = json!({
+            "access_token": "SECRET-AT2",
+            "refresh_token": "SECRET-RT2",
+            "expires_in": 28_800,
+            "scope": "user:inference user:profile user:sessions:claude_code",
+            "token_type": "Bearer"
+        });
+        let renewed = claude_renewed(&old, &answer, now).unwrap();
+        let oauth = oauth_of(&renewed);
+        assert_eq!(oauth["accessToken"], "SECRET-AT2");
+        assert_eq!(oauth["refreshToken"], "SECRET-RT2");
+        assert_eq!(oauth["expiresAt"], (now + 28_800) * 1000);
+        assert_eq!(
+            oauth["scopes"],
+            json!([
+                "user:inference",
+                "user:profile",
+                "user:sessions:claude_code"
+            ])
+        );
+        assert_eq!(oauth["subscriptionType"], "team");
+        assert_eq!(oauth["rateLimitTier"], "default_claude_max_5x");
+
+        let blob: Value = serde_json::from_slice(&renewed).unwrap();
+        assert_eq!(blob["oauth_account"]["emailAddress"], "a@x.com");
+        let creds: Value = serde_json::from_str(blob["credentials"].as_str().unwrap()).unwrap();
+        assert_eq!(creds["mcpOAuth"]["kept"], true);
+        assert!(matches!(claude_token(&renewed, now), Token::Valid(t) if t == "SECRET-AT2"));
+    }
+
+    #[test]
+    fn a_renewal_answer_without_a_new_refresh_token_keeps_the_old_one() {
+        let now = 1_800_000_000;
+        let old = login(lapsing_at(now - 60));
+        let answer = json!({"access_token": "SECRET-AT2", "expires_in": 3_600});
+        let oauth = oauth_of(&claude_renewed(&old, &answer, now).unwrap());
+        assert_eq!(oauth["refreshToken"], "SECRET-RT");
+        assert_eq!(oauth["scopes"], json!(["user:inference", "user:profile"]));
+
+        assert!(claude_renewed(&old, &json!({"expires_in": 3_600}), now).is_none());
+    }
+
+    #[test]
+    fn a_renewal_answer_without_a_lifetime_is_kept_for_an_hour() {
+        let now = 1_800_000_000;
+        let old = login(lapsing_at(now - 60));
+        let answer = json!({"access_token": "SECRET-AT2", "refresh_token": "SECRET-RT2"});
+        let oauth = oauth_of(&claude_renewed(&old, &answer, now).unwrap());
+        assert_eq!(oauth["refreshToken"], "SECRET-RT2");
+        assert_eq!(oauth["expiresAt"], (now + 3_600) * 1000);
+    }
+
+    #[test]
+    fn only_an_invalid_grant_is_a_refused_renewal() {
+        let refused = |status, said: Value| {
+            matches!(
+                renewal_refused(status, Some(&said)),
+                FetchError::Unauthorized
+            )
+        };
+        assert!(refused(400, json!({"error": "invalid_grant"})));
+        assert!(refused(401, json!({"error": "invalid_grant"})));
+        assert!(!refused(401, json!({"error": "invalid_client"})));
+        assert!(!refused(400, json!({"error": "invalid_scope"})));
+        assert!(!refused(
+            401,
+            json!({"error": {"type": "authentication_error"}})
+        ));
+        assert!(!refused(500, json!({"error": "invalid_grant"})));
+        assert!(matches!(
+            renewal_refused(429, None),
+            FetchError::Other(why) if why == RATE_LIMITED
+        ));
+        assert!(matches!(
+            renewal_refused(400, Some(&json!({"error": "invalid_scope"}))),
+            FetchError::Other(why) if why == "Anthropic answered 400 (invalid_scope)"
+        ));
     }
 }
