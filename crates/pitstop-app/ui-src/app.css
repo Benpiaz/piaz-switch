@@ -2084,6 +2084,15 @@
     text-wrap: pretty;
   }
 
+  /* The welcome sheet: the tools found, and the open-at-login switch. */
+  .welcome-tools {
+    @apply flex flex-wrap gap-2;
+  }
+
+  .welcome-row {
+    @apply flex items-center justify-between gap-4;
+  }
+
   .failure {
     display: grid;
     grid-template-columns: 18px minmax(0, 1fr);

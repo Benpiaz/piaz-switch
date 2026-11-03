@@ -34,6 +34,8 @@ pub struct Settings {
     pub warm_to: String,
     /// Look for a newer Piaz Switch now and then, and say when there is one.
     pub check_updates: bool,
+    /// The welcome sheet was seen, or there were accounts before it.
+    pub welcomed: bool,
 }
 
 impl Default for Settings {
@@ -50,6 +52,7 @@ impl Default for Settings {
             warm_from: "07:00".into(),
             warm_to: "23:00".into(),
             check_updates: true,
+            welcomed: false,
         }
     }
 }
@@ -105,6 +108,7 @@ mod tests {
         assert_eq!(settings.warm_from, "07:00");
         assert_eq!(settings.warm_to, "23:00");
         assert!(settings.check_updates);
+        assert!(!settings.welcomed);
     }
 
     #[test]

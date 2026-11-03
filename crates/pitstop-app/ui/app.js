@@ -1209,6 +1209,7 @@ function openDialog(model) {
 }
 
 function closeDialog() {
+  if (dialog && dialog.type === "welcome") invoke("set_welcomed").catch(() => {});
   dialog = null;
   renderDialog();
   if (deferredAlert) {
@@ -1719,6 +1720,87 @@ const DIALOGS = {
     const d = dialog;
     return [sheetHead(d.title, d.message, { tone: "error", icon: "error" }), buttons(h("span", { class: "spacer" }), keyed(button(t("ok"), closeDialog, "primary"), "primary"))];
   },
+
+  /** The first time Piaz Switch opens, before any account is added. */
+  welcome() {
+    const d = dialog;
+    const tools = snap ? snap.tools : [];
+    const found = tools.filter((x) => x.installed === true);
+    const looking = tools.some((x) => x.installed === null || x.installed === undefined);
+    const autostart = h("button", {
+      class: "switch" + (d.autostart ? " on" : ""),
+      role: "switch",
+      "aria-checked": d.autostart ? "true" : "false",
+      "aria-label": t("openAtLogin"),
+      onclick: () => {
+        d.autostart = !d.autostart;
+        renderDialog();
+        invoke("set_autostart", { on: d.autostart }).catch((error) => {
+          d.autostart = !d.autostart;
+          renderDialog();
+          toast(errorText(error));
+        });
+      },
+    });
+    return [
+      sheetHead(t("welcomeTitle"), t("welcomeIntro"), { tone: "accent", icon: "swap" }),
+      h(
+        "div",
+        { class: "form" },
+        h(
+          "div",
+          { class: "field" },
+          h("div", { class: "field-label", text: t("welcomeFound") }),
+          found.length
+            ? h(
+                "div",
+                { class: "welcome-tools" },
+                found.map((x) => h("span", { class: "chip" }, toolLogo(x.id), h("span", { text: x.name }))),
+              )
+            : h("p", { class: "footnote", text: looking ? t("welcomeLooking") : t("welcomeNoTools") }),
+        ),
+        h(
+          "div",
+          { class: "field" },
+          h("div", { class: "field-label", text: t("welcomeIcon") }),
+          h("p", { class: "footnote", text: isMac ? t("welcomeIconMac") : t("welcomeIconWindows") }),
+          isMac
+            ? null
+            : h(
+                "div",
+                null,
+                keyed(
+                  h("button", { class: "button compact", onclick: () => invoke("open_taskbar_settings").catch((error) => toast(errorText(error))) }, icon("external"), t("taskbarSettings")),
+                  "taskbar-settings",
+                ),
+              ),
+        ),
+        h(
+          "div",
+          { class: "welcome-row" },
+          h("div", null, h("div", { class: "field-label", text: t("openAtLogin") }), h("p", { class: "footnote", text: t("openAtLoginHelp") })),
+          keyed(autostart, "welcome-autostart"),
+        ),
+      ),
+      buttons(
+        h("span", { class: "spacer" }),
+        keyed(button(t("welcomeLater"), closeDialog), "cancel"),
+        keyed(
+          button(
+            t("getStarted"),
+            () => {
+              closeDialog();
+              pane = "accounts";
+              render();
+              openAdd();
+            },
+            "primary",
+          ),
+          "primary",
+        ),
+      ),
+    ];
+  },
 };
 
 function openAdd(provider) {
@@ -1843,7 +1925,13 @@ function onSignIn(event) {
 }
 
 /** The tray menu asked for one of the window's dialogs. */
+let openedSerial = 0; // the last request opened, of those that carry one
+
 function onOpenDialog(request) {
+  if (request.serial) {
+    if (request.serial <= openedSerial) return;
+    openedSerial = request.serial;
+  }
   if (request.kind === "add") openAdd(request.provider || undefined);
   else if (request.kind === "name" && request.provider) openName(request.provider);
   else if (request.kind === "confirm-switch") {
@@ -2483,7 +2571,7 @@ async function start() {
     if (snap && next.revision < snap.revision) return;
     snap = next;
     render();
-    if (dialog && dialog.type === "signin" && dialog.phase === "form") renderDialog();
+    if (dialog && ((dialog.type === "signin" && dialog.phase === "form") || dialog.type === "welcome")) renderDialog();
   });
   await listen("sign-in", onSignIn);
   await listen("open-dialog", onOpenDialog);
@@ -2498,6 +2586,16 @@ async function start() {
   if (!snap || fetched.revision >= snap.revision) snap = fetched;
   clearTimeout(early);
   render();
+  // A Jump List task may have asked for a dialog before this page listened;
+  // then a newcomer is welcomed, unless a dialog is up.
+  invoke("take_pending_dialog")
+    .then((request) => request && onOpenDialog(request))
+    .catch(() => {})
+    .then(() => invoke("get_welcome"))
+    .then((show) => {
+      if (show && !dialog) openDialog({ type: "welcome", autostart: Boolean(snap && snap.autostart) });
+    })
+    .catch(() => {});
   // "resets in" and pace move with the clock.
   setInterval(() => {
     if (pressing) return;
