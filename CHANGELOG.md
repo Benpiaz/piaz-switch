@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.6.0] - 2026-11-04
 
 ### Added
 - **Use first** in Settings → Automation: **Most left** (as before) or **Week that
