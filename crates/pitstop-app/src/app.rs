@@ -304,7 +304,11 @@ pub fn warming(app: &AppHandle, provider: ProviderId, name: &str) -> bool {
 /// The tools Piaz Switch moves to another account by itself when one runs
 /// out: those that read a login on every new session, so a switch reaches
 /// the next one at no cost to the work in progress.
-const AUTO_SWITCHED: [ProviderId; 2] = [ProviderId::ClaudeCode, ProviderId::DeepSeek];
+const AUTO_SWITCHED: [ProviderId; 3] = [
+    ProviderId::ClaudeCode,
+    ProviderId::DeepSeek,
+    ProviderId::Grok,
+];
 
 fn duties(app: &AppHandle) {
     let Some(snapshot) = snapshot(app) else {

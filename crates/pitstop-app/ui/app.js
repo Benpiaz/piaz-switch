@@ -1580,7 +1580,7 @@ const DIALOGS = {
             ],
         missing.map((x) =>
           // Antigravity counts only as its editor: say so, since the Antigravity 2 app may be there.
-          h("p", { class: "footnote", text: x.id === "antigravity" ? t("appMissingAntigravity") : isEditor(x.id) ? t("appMissing", { tool: x.name }) : t("toolMissing", { tool: x.name, program: { codex: "codex", deepseek: "OpenCode" }[x.id] || "claude" }) }),
+          h("p", { class: "footnote", text: x.id === "antigravity" ? t("appMissingAntigravity") : isEditor(x.id) ? t("appMissing", { tool: x.name }) : t("toolMissing", { tool: x.name, program: { codex: "codex", deepseek: "OpenCode", grok: "grok" }[x.id] || "claude" }) }),
         ),
         d.again ? null : h("p", { class: "footnote", text: isEditor(d.provider) ? t("addWarningEditor", { tool: toolName }) : t("addWarning") }),
       ),

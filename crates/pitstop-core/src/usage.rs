@@ -22,6 +22,7 @@ pub const USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
 pub const CODEX_USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
 pub const CURSOR_USAGE_URL: &str =
     "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage";
+pub const GROK_BILLING_URL: &str = "https://cli-chat-proxy.grok.com/v1/billing?format=credits";
 pub const DEEPSEEK_BALANCE_URL: &str = "https://api.deepseek.com/user/balance";
 pub const CURSOR_PLAN_URL: &str = "https://api2.cursor.sh/aiserver.v1.DashboardService/GetPlanInfo";
 
@@ -102,6 +103,8 @@ pub trait UsageApi: Sync {
     fn cursor(&self, access_token: &str) -> Result<Value, FetchError>;
     /// DeepSeek's balance for an API key: a plain GET, no model request.
     fn deepseek(&self, api_key: &str) -> Result<Value, FetchError>;
+    /// Grok Build's weekly pool for its access token, as its `/usage` reads it.
+    fn grok(&self, access_token: &str) -> Result<Value, FetchError>;
 }
 
 /// Anthropic and OpenAI over the network.
@@ -201,6 +204,17 @@ impl UsageApi for Http {
             }
         }
         Ok(body)
+    }
+
+    fn grok(&self, access_token: &str) -> Result<Value, FetchError> {
+        let response = call_twice(|| {
+            self.agent
+                .get(GROK_BILLING_URL)
+                .header("Authorization", format!("Bearer {access_token}"))
+                .header("User-Agent", "grok-cli")
+                .call()
+        });
+        answer(response, "xAI")
     }
 
     fn deepseek(&self, api_key: &str) -> Result<Value, FetchError> {
@@ -474,6 +488,53 @@ pub fn parse_deepseek(body: &Value) -> Option<Usage> {
     })
 }
 
+/// Grok's `/v1/billing`: `config.currentPeriod {start, end}` and
+/// `config.productUsage[{product, usagePercent}]`; the pool is shared, so the
+/// Grok Build share (else the credit share) is the weekly limit.
+pub fn parse_grok(body: &Value) -> Option<Usage> {
+    let config = body.get("config")?;
+    let percent = config
+        .get("productUsage")
+        .and_then(Value::as_array)
+        .and_then(|products| {
+            products
+                .iter()
+                .find(|p| p.get("product").and_then(Value::as_str) == Some("GrokBuild"))
+        })
+        .and_then(|p| p.get("usagePercent")?.as_f64())
+        .or_else(|| config.get("creditUsagePercent")?.as_f64())?;
+    let time = |key: &str| {
+        config
+            .pointer(&format!("/currentPeriod/{key}"))
+            .and_then(Value::as_str)
+            .and_then(parse_rfc3339)
+    };
+    let (start, end) = (time("start"), time("end"));
+    Some(Usage {
+        windows: vec![Window {
+            label: "week".into(),
+            percent,
+            resets_at: end,
+            length_secs: start.zip(end).map(|(s, e)| e - s).or(Some(WEEK)),
+            quiet: false,
+            idle: false,
+        }],
+        balance: None,
+        plan: None,
+    })
+}
+
+pub fn grok_report(result: Result<Value, FetchError>) -> UsageReport {
+    match result {
+        Ok(body) => parse_grok(&body).map_or_else(
+            || UsageReport::Failed("Grok sent no usage".into()),
+            UsageReport::Ok,
+        ),
+        Err(FetchError::Unauthorized) => UsageReport::Unauthorized,
+        Err(FetchError::Other(message)) => UsageReport::Failed(message),
+    }
+}
+
 pub fn deepseek_report(result: Result<Value, FetchError>) -> UsageReport {
     match result {
         Ok(body) => parse_deepseek(&body).map_or_else(
@@ -664,6 +725,42 @@ mod tests {
             .expect("OpenCode holds a DeepSeek key");
         let key = crate::provider::deepseek::api_key(&login.blob).unwrap();
         println!("{:?}", deepseek_report(Http::new().deepseek(&key)));
+    }
+
+    /// Against the Grok login on this computer, read only: `cargo test -p
+    /// pitstop-core real_grok -- --ignored --nocapture`. Prints the weekly share.
+    #[test]
+    #[ignore = "reads the real login and asks xAI"]
+    fn real_grok_usage() {
+        use crate::provider::{grok, provider_for, ProviderId};
+        let host = crate::host::RealHost::new();
+        let login = provider_for(ProviderId::Grok)
+            .read_active(&host)
+            .unwrap()
+            .expect("Grok is signed in");
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        match grok::access(&login.blob, now) {
+            grok::Access::Valid(token) => println!("{:?}", grok_report(Http::new().grok(&token))),
+            _ => println!("access token expired"),
+        }
+    }
+
+    #[test]
+    fn grok_weekly_pool_is_read_from_the_grok_build_share() {
+        let body = serde_json::json!({"config": {
+            "currentPeriod": {"type": "USAGE_PERIOD_TYPE_WEEKLY",
+                "start": "2026-10-29T05:28:04.99+00:00", "end": "2026-11-05T05:28:04.99+00:00"},
+            "creditUsagePercent": 31.0,
+            "productUsage": [{"product": "GrokBuild", "usagePercent": 28.0}]}});
+        let usage = parse_grok(&body).unwrap();
+        let week = &usage.windows[0];
+        assert_eq!((week.label.as_str(), week.percent), ("week", 28.0));
+        assert_eq!(week.length_secs, Some(WEEK));
+        assert_eq!(week.resets_at, parse_rfc3339("2026-11-05T05:28:04Z"));
+        assert!(parse_grok(&serde_json::json!({})).is_none());
     }
 
     #[test]

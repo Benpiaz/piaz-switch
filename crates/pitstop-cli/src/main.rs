@@ -220,7 +220,7 @@ fn main() {
                             ProviderId::Codex => println!(
                                 "Note: a running Codex keeps the old account until restarted."
                             ),
-                            ProviderId::DeepSeek => println!(
+                            ProviderId::DeepSeek | ProviderId::Grok => println!(
                                 "Note: {} sessions already running keep the old account; new ones use this one.",
                                 provider.display_name()
                             ),

@@ -117,7 +117,9 @@ pub fn app(provider: ProviderId) -> Option<&'static App> {
     match provider {
         ProviderId::Cursor => Some(&CURSOR),
         ProviderId::Antigravity => Some(&ANTIGRAVITY),
-        ProviderId::ClaudeCode | ProviderId::Codex | ProviderId::DeepSeek => None,
+        ProviderId::ClaudeCode | ProviderId::Codex | ProviderId::DeepSeek | ProviderId::Grok => {
+            None
+        }
     }
 }
 

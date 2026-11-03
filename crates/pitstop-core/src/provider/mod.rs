@@ -3,6 +3,7 @@ pub mod claude_code;
 pub mod codex;
 pub mod cursor;
 pub mod deepseek;
+pub mod grok;
 
 use std::path::Path;
 
@@ -24,15 +25,19 @@ pub enum ProviderId {
     /// A DeepSeek API key, as OpenCode uses it.
     #[serde(rename = "deepseek")]
     DeepSeek,
+    /// xAI's Grok Build, whose login is `~/.grok/auth.json`.
+    #[serde(rename = "grok")]
+    Grok,
 }
 
 impl ProviderId {
-    pub const ALL: [ProviderId; 5] = [
+    pub const ALL: [ProviderId; 6] = [
         ProviderId::ClaudeCode,
         ProviderId::Codex,
         ProviderId::Cursor,
         ProviderId::Antigravity,
         ProviderId::DeepSeek,
+        ProviderId::Grok,
     ];
 
     pub fn as_str(&self) -> &'static str {
@@ -42,6 +47,7 @@ impl ProviderId {
             ProviderId::Cursor => "cursor",
             ProviderId::Antigravity => "antigravity",
             ProviderId::DeepSeek => "deepseek",
+            ProviderId::Grok => "grok",
         }
     }
 
@@ -57,6 +63,7 @@ impl ProviderId {
             ProviderId::Cursor => "Cursor",
             ProviderId::Antigravity => "Antigravity",
             ProviderId::DeepSeek => "DeepSeek",
+            ProviderId::Grok => "Grok",
         }
     }
 
@@ -67,8 +74,9 @@ impl ProviderId {
             "cursor" => Ok(ProviderId::Cursor),
             "antigravity" | "gemini" => Ok(ProviderId::Antigravity),
             "deepseek" => Ok(ProviderId::DeepSeek),
+            "grok" | "xai" => Ok(ProviderId::Grok),
             other => Err(Error::InvalidData(format!(
-                "unknown provider `{other}` (use claude-code, codex, cursor, antigravity or deepseek)"
+                "unknown provider `{other}` (use claude-code, codex, cursor, antigravity, deepseek or grok)"
             ))),
         }
     }
@@ -141,5 +149,6 @@ pub fn provider_for(id: ProviderId) -> Box<dyn Provider> {
         ProviderId::Cursor => Box::new(cursor::Cursor),
         ProviderId::Antigravity => Box::new(antigravity::Antigravity),
         ProviderId::DeepSeek => Box::new(deepseek::DeepSeek),
+        ProviderId::Grok => Box::new(grok::Grok),
     }
 }

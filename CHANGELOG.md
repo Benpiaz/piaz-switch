@@ -7,6 +7,10 @@
   to Piaz Switch through a status line (`pitstop-app --statusline`), so the account in
   use keeps its numbers when the usage endpoint turns reads away (Claude Code 2.1.80
   or later). A status line of your own is never replaced.
+- **Grok** accounts: park, switch and see the weekly pool of the Grok Build login
+  (`~/.grok/auth.json`), and switch them by themselves when it runs out. Sign in with
+  `grok login`, then name the login in Piaz Switch; sessions that were already running
+  keep their account.
 - **DeepSeek** accounts: park, switch and see the balance of the DeepSeek API key that
   OpenCode uses. The card shows the money left, an empty
   balance counts as a used-up limit, and automatic switching moves to a key with money.
@@ -16,6 +20,8 @@
   their key.
 
 ### Changed
+- The wording of the limit rows, balance, peak-price and Settings texts reads more naturally
+  in English and Vietnamese.
 - Limits read as short blocks under a heading for their scope (Fable, Gemini): the name
   and figure on one line, a flat bar under it, the timing last, and a scope's limits side
   by side when there is room. Rows read "5-Hour Limit" and "Weekly Limit" ("Giới hạn 5

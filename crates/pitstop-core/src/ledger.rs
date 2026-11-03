@@ -434,7 +434,8 @@ impl Ledger {
                 ProviderId::ClaudeCode
                 | ProviderId::Cursor
                 | ProviderId::Antigravity
-                | ProviderId::DeepSeek => Log::Claude(ClaudeLog::default()),
+                | ProviderId::DeepSeek
+                | ProviderId::Grok => Log::Claude(ClaudeLog::default()),
             },
         };
         let scan = self.files.entry(path.to_path_buf()).or_insert_with(fresh);

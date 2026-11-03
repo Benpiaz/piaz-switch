@@ -504,6 +504,8 @@ enum Request {
     Cursor(String),
     /// DeepSeek's balance for an API key.
     DeepSeek(String),
+    /// Grok Build's weekly pool for an access token.
+    Grok(String),
     /// Known without asking anyone.
     Known(UsageReport),
 }
@@ -539,6 +541,11 @@ impl Request {
                 Some((token, _)) => Ok(Request::Cursor(token)),
                 None => Err(missing()),
             },
+            ProviderId::Grok => match crate::provider::grok::access(blob, now) {
+                crate::provider::grok::Access::Valid(token) => Ok(Request::Grok(token)),
+                crate::provider::grok::Access::Expired => Err(UsageReport::Expired),
+                crate::provider::grok::Access::Missing => Err(missing()),
+            },
             ProviderId::DeepSeek => crate::provider::deepseek::api_key(blob)
                 .map(Request::DeepSeek)
                 .ok_or_else(missing),
@@ -562,6 +569,7 @@ impl Request {
                 account_id,
             } => usage::codex_report(api.codex(&access_token, &account_id)),
             Request::Cursor(token) => usage::cursor_report(api.cursor(&token)),
+            Request::Grok(token) => usage::grok_report(api.grok(&token)),
             Request::DeepSeek(key) => usage::deepseek_report(api.deepseek(&key)),
             Request::Known(report) => report,
         }
@@ -1289,6 +1297,15 @@ mod tests {
     }
 
     impl UsageApi for FakeApi {
+        fn grok(&self, token: &str) -> std::result::Result<serde_json::Value, usage::FetchError> {
+            match token {
+                "tok-a@x.com" => Ok(serde_json::json!({"config": {
+                    "currentPeriod": {"start": "2026-10-29T05:28:04+00:00", "end": "2099-01-01T00:00:00+00:00"},
+                    "productUsage": [{"product": "GrokBuild", "usagePercent": 28.0}]}})),
+                _ => Err(usage::FetchError::Unauthorized),
+            }
+        }
+
         fn deepseek(&self, key: &str) -> std::result::Result<serde_json::Value, usage::FetchError> {
             match key {
                 "sk-has-money" => Ok(serde_json::json!({"is_available": true, "balance_infos": [
@@ -1431,6 +1448,37 @@ mod tests {
         claude_live::save(engine.host(), input, now_epoch() as i64).unwrap();
         let all = engine.usage(&api).unwrap();
         assert_eq!(five_hour(report_for(&all, "work")), 33.0);
+    }
+
+    #[test]
+    fn grok_logins_switch_by_file_and_report_the_weekly_pool() {
+        use crate::provider::grok::auth_path;
+        let login = |email: &str, expires: &str| {
+            format!(
+                r#"{{"https://auth.x.ai::c":{{"key":"tok-{email}","email":"{email}","expires_at":"{expires}","refresh_token":"r"}}}}"#
+            )
+        };
+        let engine = Engine::new(FakeHost::new());
+        let path = auth_path(engine.host());
+        engine
+            .host()
+            .put_file(path.clone(), login("a@x.com", "2099-01-01T00:00:00Z"));
+        engine.enroll(ProviderId::Grok, "a").unwrap();
+        engine
+            .host()
+            .put_file(path.clone(), login("b@x.com", "2001-01-01T00:00:00Z"));
+        engine.enroll(ProviderId::Grok, "b").unwrap();
+
+        let all = engine.usage(&FakeApi::new()).unwrap();
+        let UsageReport::Ok(a) = report_for(&all, "a") else {
+            panic!("a is read");
+        };
+        assert_eq!(a.windows[0].percent, 28.0);
+        assert_eq!(report_for(&all, "b"), &UsageReport::Expired);
+
+        engine.switch("a", Some(ProviderId::Grok)).unwrap();
+        let live = String::from_utf8(engine.host().file(&path).unwrap()).unwrap();
+        assert!(live.contains("a@x.com"));
     }
 
     #[test]
