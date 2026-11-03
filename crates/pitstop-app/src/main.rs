@@ -4,6 +4,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
+mod cli;
 mod commands;
 mod duty;
 mod i18n;
@@ -22,6 +23,13 @@ use tauri::{Manager, RunEvent, WindowEvent};
 use tauri_plugin_autostart::MacosLauncher;
 
 fn main() {
+    // Claude Code's status line and the daily renewal run this program for
+    // an answer: they get it, and no window, tray or second instance starts.
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(code) = cli::headless(&args) {
+        std::process::exit(code);
+    }
+
     // Started with the session: tray only, no window. Not right after an
     // update, though, which starts the new version with the old one's flags.
     let updated = updates::just_updated();
@@ -61,6 +69,9 @@ fn main() {
             commands::set_warm_up,
             commands::get_activity,
             commands::run_diagnostics,
+            cli::command_line_status,
+            cli::set_status_line,
+            cli::set_keep_fresh,
             commands::quit,
             usage_logs::usage_report,
             updates::update_status,

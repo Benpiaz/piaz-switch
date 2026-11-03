@@ -161,6 +161,7 @@ pub fn refresh(app: &AppHandle) {
         }
         inner.snapshot = Some(snapshot.clone());
     }
+    crate::cli::keep_usage(&snapshot);
     let _ = app.emit("snapshot", &snapshot);
     crate::tray::update(app, &snapshot, lang);
 }
@@ -233,6 +234,10 @@ fn follow(app: &AppHandle, plan: duty::ReadPlan) {
 /// Renew the parked Claude Code logins whose token has lapsed, so the read
 /// that follows can read them; switches wait meanwhile.
 fn renew_parked(app: &AppHandle) {
+    // The daily renewal is running: it renews them this time.
+    if !crate::cli::hold_presence() {
+        return;
+    }
     let state = app.state::<AppState>();
     // Never `inner` held while waiting for `ops`.
     let failures = match state.inner.lock() {
@@ -828,6 +833,8 @@ pub fn look_for_tools(app: &AppHandle, now: bool) -> bool {
 pub fn start_background(app: &AppHandle) {
     let handle = app.clone();
     std::thread::spawn(move || {
+        // Tells the daily renewal the app is open, for as long as it is.
+        crate::cli::hold_presence();
         // What a sign-in left when the app or the computer stopped under it.
         pitstop_core::signin::sweep_leftovers();
         refresh(&handle);
