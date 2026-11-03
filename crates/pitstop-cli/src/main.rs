@@ -71,6 +71,24 @@ enum Command {
     /// Check what Piaz Switch relies on: its folder, the vault key, each
     /// tool's program, the login in use and every parked login.
     Doctor,
+    /// Print every Claude Code account's 5-hour and weekly use on one line,
+    /// for Claude Code's `statusLine`. Reads only what the app last read.
+    Statusline,
+    /// Renew the parked Claude Code logins that are due, unless the app is
+    /// open (it renews them itself).
+    Renew,
+    /// Have the system run `renew` once a day: install, uninstall or status.
+    Schedule {
+        #[arg(value_enum)]
+        action: ScheduleAction,
+    },
+}
+
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum ScheduleAction {
+    Install,
+    Uninstall,
+    Status,
 }
 
 fn parse_provider(s: Option<&str>) -> Result<Option<ProviderId>> {
@@ -255,6 +273,80 @@ fn doctor_line(check: &doctor::Check) -> String {
         }
         (other, code) => format!("{other}: {code}"),
     }
+}
+
+/// The program the daily job runs: the app beside this command (the
+/// portable zip) or where its installer puts it, which opens no console
+/// window when run on Windows; else this command itself.
+fn job_program() -> Result<PathBuf> {
+    let me = std::env::current_exe()?;
+    let beside = me
+        .parent()
+        .map(|dir| ["Piaz Switch.exe", "pitstop-app.exe"].map(|n| dir.join(n)))
+        .into_iter()
+        .flatten();
+    let installed = dirs::data_local_dir().map(|d| d.join("Piaz Switch").join("pitstop-app.exe"));
+    Ok(beside
+        .chain(installed)
+        .find(|p| cfg!(windows) && p.is_file())
+        .unwrap_or(me))
+}
+
+fn print_renew(engine: &Engine<RealHost>) -> Result<()> {
+    use pitstop_core::engine::Renewal;
+    use pitstop_core::schedule::{self, RenewRun};
+    let app_running = pitstop_core::presence::app_process_running;
+    match schedule::renew_now(engine, &Http::new(), By::Cli, now_epoch(), &app_running)? {
+        RenewRun::AppOpen => println!("Piaz Switch is open and renews parked logins itself."),
+        RenewRun::Unsure => {
+            println!("Couldn't tell whether Piaz Switch is open, so nothing was renewed.")
+        }
+        RenewRun::Ran(renewed) if renewed.is_empty() => println!("No parked login was due."),
+        RenewRun::Ran(renewed) => {
+            for (name, renewal) in renewed {
+                match renewal {
+                    Renewal::Renewed => println!("{name}: renewed"),
+                    Renewal::Refused => {
+                        println!("{name}: refused; sign in to it again in Piaz Switch")
+                    }
+                    Renewal::Failed(why) => println!("{name}: not renewed ({why})"),
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn print_schedule(action: ScheduleAction) -> Result<()> {
+    use pitstop_core::schedule;
+    if !schedule::supported() {
+        anyhow::bail!("this system has no scheduler Piaz Switch knows");
+    }
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home directory"))?;
+    match action {
+        ScheduleAction::Install => {
+            let program = job_program()?;
+            schedule::install(&home, &program)?;
+            println!(
+                "Parked logins are renewed daily at {:02}:{:02} by `{}`.",
+                schedule::AT_HOUR,
+                schedule::AT_MINUTE,
+                schedule::task_run(&program)
+            );
+        }
+        ScheduleAction::Uninstall => {
+            schedule::uninstall(&home)?;
+            println!("The daily renewal is off.");
+        }
+        ScheduleAction::Status => {
+            if schedule::installed(&home)? {
+                println!("The daily renewal is on.");
+            } else {
+                println!("The daily renewal is off.");
+            }
+        }
+    }
+    Ok(())
 }
 
 fn now_epoch() -> i64 {
@@ -444,6 +536,9 @@ fn main() {
                     std::process::exit(1);
                 }
             }
+            Command::Statusline => println!("{}", pitstop_core::statusline::run(&host)),
+            Command::Renew => print_renew(&engine)?,
+            Command::Schedule { action } => print_schedule(action)?,
         }
         Ok(())
     })();

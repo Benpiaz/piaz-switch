@@ -1,4 +1,5 @@
 pub mod activity;
+pub mod claude_settings;
 pub mod cursor_login;
 pub mod doctor;
 pub mod editor;
@@ -8,14 +9,18 @@ pub mod host;
 pub mod ledger;
 pub mod live;
 pub(crate) mod pb;
+pub mod presence;
 pub mod pricing;
 pub mod provider;
+pub mod schedule;
 pub mod signin;
 pub mod state;
+pub mod statusline;
 #[cfg(windows)]
 pub mod store;
 pub mod testing;
 pub mod usage;
+pub mod usage_cache;
 pub mod vault;
 pub mod vscdb;
 

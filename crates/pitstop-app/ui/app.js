@@ -1923,6 +1923,7 @@ function renderSettings() {
     automationGroups(),
     updateGroup(),
     troubleshootGroup(),
+    commandLineGroup(),
     h(
       "section",
       { class: "group" },
@@ -2119,6 +2120,80 @@ function automationGroups() {
     ),
   );
   return [automatic, warmUp];
+}
+
+// ---------- settings: command line (status line, daily renewal) ----------
+
+let commandLine = null; // what Claude Code's settings and the system's scheduler hold
+let commandLineAt = 0; // when that was last asked
+let commandLineBusy = false;
+
+/** Ask again at most once a minute: the scheduler is asked by running a program. */
+function loadCommandLine() {
+  commandLineAt = Date.now();
+  invoke("command_line_status")
+    .then((state) => {
+      commandLine = state;
+    })
+    .catch(() => {})
+    .finally(() => {
+      if (pane === "settings") render();
+    });
+}
+
+async function changeCommandLine(command, on) {
+  commandLineBusy = true;
+  render();
+  try {
+    commandLine = await invoke(command, { on });
+  } catch (error) {
+    openAlert(t("couldntChange"), errorText(error));
+  }
+  commandLineBusy = false;
+  render();
+}
+
+function commandLineGroup() {
+  if (!commandLineBusy && Date.now() - commandLineAt > 60000) loadCommandLine();
+  const c = commandLine;
+  if (!c) return null;
+  const line = c.statusLine;
+  const action =
+    line === "absent" || line === "stale"
+      ? button(t(line === "stale" ? "statusLineUpdate" : "statusLineAdd"), () => changeCommandLine("set_status_line", true), "compact")
+      : line === "ours"
+        ? button(t("statusLineRemove"), () => changeCommandLine("set_status_line", false), "compact")
+        : h("button", { class: "button compact", onclick: () => copy(c.command) }, icon("copy"), t("copyCommand"));
+  action.disabled = commandLineBusy;
+  const help = { absent: "statusLineHelp", ours: "statusLineOn", stale: "statusLineStale", other: "statusLineOther", unreadable: "statusLineUnreadable" }[line] || "statusLineHelp";
+  const fresh = c.keepFreshSupported ? toggle(c.keepFresh, t("keepFresh"), () => changeCommandLine("set_keep_fresh", !c.keepFresh), "keep-fresh") : null;
+  if (fresh) fresh.disabled = commandLineBusy;
+  return h(
+    "section",
+    { class: "group" },
+    h("h2", { class: "group-head", text: t("commandLine") }),
+    h(
+      "div",
+      { class: "panel" },
+      h(
+        "div",
+        { class: "setting-row" },
+        h("div", null, h("div", { class: "setting-name", text: t("statusLineName") }), h("p", { class: "help", text: t(help) })),
+        keyed(action, "status-line"),
+      ),
+      h(
+        "div",
+        { class: "setting-row" + (c.keepFreshSupported ? "" : " muted") },
+        h(
+          "div",
+          null,
+          h("div", { class: "setting-name", text: t("keepFresh") }),
+          h("p", { class: "help", text: t(!c.keepFreshSupported ? "keepFreshUnsupported" : isMac ? "keepFreshHelpMac" : "keepFreshHelpPc") }),
+        ),
+        fresh,
+      ),
+    ),
+  );
 }
 
 // ---------- settings: troubleshoot (diagnostics, activity) ----------
