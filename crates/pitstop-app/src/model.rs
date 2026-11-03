@@ -44,6 +44,7 @@ pub struct Snapshot {
 pub struct Automation {
     pub auto_switch: bool,
     pub auto_switch_at: u8,
+    pub use_first: crate::duty::UseFirst,
     pub notify_run_out: bool,
     pub warm_from: String,
     pub warm_to: String,
@@ -178,24 +179,7 @@ impl UiError {
 
 impl From<&Error> for UiError {
     fn from(e: &Error) -> Self {
-        let code = match e {
-            Error::NotLoggedIn(_) => "notLoggedIn",
-            Error::DuplicateAccount(..) => "duplicateAccount",
-            Error::AlreadyEnrolled { .. } => "alreadyEnrolled",
-            Error::WrongAccount { .. } => "wrongAccount",
-            Error::UnknownAccount(_) => "unknownAccount",
-            Error::AmbiguousAccount(_) => "ambiguousAccount",
-            Error::InvalidName(_) => "invalidName",
-            Error::VaultKeyMissing => "vaultKeyMissing",
-            Error::VaultBlobMissing(_) => "vaultBlobMissing",
-            Error::VaultCorrupt(_) => "vaultCorrupt",
-            Error::ToolNotFound(_) => "toolNotFound",
-            Error::SignIn(_) => "signIn",
-            Error::EditorStillOpen(_) => "editorStillOpen",
-            Error::Io { .. } => "io",
-            Error::Keystore(_) => "keystore",
-            Error::InvalidData(_) => "invalidData",
-        };
+        let code = e.code();
         let name = match e {
             Error::AlreadyEnrolled { name, .. }
             | Error::WrongAccount { name, .. }
@@ -246,6 +230,7 @@ pub fn build<H: Host>(engine: &Engine<H>, input: &Input) -> Snapshot {
         automation: Automation {
             auto_switch: input.settings.auto_switch,
             auto_switch_at: input.settings.auto_switch_at,
+            use_first: input.settings.use_first,
             notify_run_out: input.settings.notify_run_out,
             warm_from: input.settings.warm_from.clone(),
             warm_to: input.settings.warm_to.clone(),
@@ -337,7 +322,7 @@ pub fn build<H: Host>(engine: &Engine<H>, input: &Input) -> Snapshot {
             }
         }
     }
-    snapshot.suggestions = suggestions(&snapshot.tools);
+    snapshot.suggestions = suggestions(&snapshot.tools, input.settings.use_first, input.now);
     snapshot.automation.warm_up = snapshot
         .tools
         .iter()
@@ -397,11 +382,21 @@ fn windows_of(account: &AccountView) -> Option<&[WindowView]> {
 /// with the most of that limit left, among those whose usage is known and
 /// that have no limit used up. Accounts of one tool may name their limits
 /// differently (a Cursor plan renewing weekly or monthly), so one without
-/// that limit isn't taken for one with all of it left.
-fn suggestions(tools: &[ToolView]) -> Vec<Suggestion> {
+/// that limit isn't taken for one with all of it left. Claude Code's offer
+/// follows the order chosen for its automatic switch.
+fn suggestions(tools: &[ToolView], order: crate::duty::UseFirst, now: i64) -> Vec<Suggestion> {
     tools
         .iter()
         .filter_map(|tool| {
+            if tool.id == ProviderId::ClaudeCode.as_str() {
+                let plan = crate::duty::switch_target(tool, 100, order, now)?;
+                return Some(Suggestion {
+                    provider: tool.id,
+                    from: plan.from,
+                    to: plan.to,
+                    window: plan.limit,
+                });
+            }
             let active = tool.accounts.iter().find(|a| a.in_use)?;
             let full = windows_of(active)?.iter().find(|w| w.percent >= 100.0)?;
             let (to, _) = tool

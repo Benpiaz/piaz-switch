@@ -40,6 +40,12 @@ fn existing_key(host: &dyn Host) -> Result<Option<Aes256Gcm>> {
     }
 }
 
+/// Whether the keystore holds a vault key that can be used; an error when
+/// the keystore can't be asked or the key there is damaged.
+pub fn key_present(host: &dyn Host) -> Result<bool> {
+    Ok(existing_key(host)?.is_some())
+}
+
 fn require_key(host: &dyn Host) -> Result<Aes256Gcm> {
     existing_key(host)?.ok_or(Error::VaultKeyMissing)
 }

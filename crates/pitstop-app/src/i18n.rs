@@ -143,6 +143,37 @@ impl Lang {
         }
     }
 
+    /// Why a switch came before any limit was reached: `to`'s week resets
+    /// first, so what it has left would be lost sooner.
+    pub fn auto_switched_early_why(
+        self,
+        from: &str,
+        to: &str,
+        to_resets: Option<&str>,
+        from_resets: Option<&str>,
+    ) -> String {
+        match (self, to_resets, from_resets) {
+            (Lang::En, Some(to_at), Some(from_at)) => format!(
+                "{to}'s week resets at {to_at}, before {from}'s at {from_at}: its quota is spent first."
+            ),
+            (Lang::En, Some(to_at), None) => format!(
+                "{to}'s week resets at {to_at}, before {from}'s: its quota is spent first."
+            ),
+            (Lang::En, None, _) => format!(
+                "{to} has no weekly limit, so what it leaves is lost every 5 hours: it is used first."
+            ),
+            (Lang::Vi, Some(to_at), Some(from_at)) => format!(
+                "Tuần của {to} reset lúc {to_at}, trước {from} ({from_at}): dùng hết quota của {to} trước."
+            ),
+            (Lang::Vi, Some(to_at), None) => format!(
+                "Tuần của {to} reset lúc {to_at}, trước {from}: dùng hết quota của {to} trước."
+            ),
+            (Lang::Vi, None, _) => format!(
+                "{to} không có giới hạn tuần, phần không dùng mất sau mỗi 5 giờ: dùng {to} trước."
+            ),
+        }
+    }
+
     pub fn cant_auto_switch(self) -> &'static str {
         self.pick(
             "Couldn't switch Claude Code automatically",

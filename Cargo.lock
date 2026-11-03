@@ -3089,6 +3089,7 @@ name = "pitstop-cli"
 version = "0.5.5"
 dependencies = [
  "anyhow",
+ "chrono",
  "clap",
  "dirs 7.0.0",
  "pitstop-core",

@@ -1428,6 +1428,119 @@
     color: var(--ink-3);
   }
 
+  /* ---------- settings pages: activity, diagnostics ---------- */
+
+  .page-intro {
+    margin: 0 4px 14px;
+  }
+
+  .log-row,
+  .diag-row {
+    justify-content: flex-start;
+    gap: 12px;
+  }
+
+  .log-text {
+    @apply min-w-0 flex-1;
+  }
+
+  .log-text .chip {
+    margin-top: 6px;
+  }
+
+  .log-icon,
+  .diag-level {
+    @apply flex flex-none items-center justify-center;
+    width: 28px;
+    height: 28px;
+    border-radius: var(--r-md);
+    background: var(--fill-soft);
+    color: var(--ink-2);
+  }
+
+  .log-icon svg,
+  .diag-level svg {
+    width: 15px;
+    height: 15px;
+  }
+
+  .log-icon.auto {
+    background: var(--accent-tint);
+    color: var(--accent-ink);
+  }
+
+  .log-icon.failed,
+  .diag-level.warn {
+    background: var(--warn-tint);
+    color: var(--warn-ink);
+  }
+
+  .diag-level.ok {
+    background: var(--ok-tint);
+    color: var(--ok-ink);
+  }
+
+  .diag-level.fail {
+    background: var(--bad-tint);
+    color: var(--bad-ink);
+  }
+
+  .log-time {
+    flex: none;
+    align-self: flex-start;
+    margin-top: 2px;
+    font-size: 13px;
+    color: var(--ink-2);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .help.selectable {
+    user-select: text;
+    -webkit-user-select: text;
+    overflow-wrap: anywhere;
+  }
+
+  .diag-summary {
+    @apply flex items-center;
+    gap: 14px;
+    margin-bottom: 22px;
+    padding: 16px;
+  }
+
+  .diag-mark {
+    @apply flex flex-none items-center justify-center;
+    width: 40px;
+    height: 40px;
+    border-radius: var(--r-lg);
+  }
+
+  .diag-mark svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .diag-summary.passed .diag-mark {
+    background: var(--ok-tint);
+    color: var(--ok-ink);
+  }
+
+  .diag-summary.warned .diag-mark {
+    background: var(--warn-tint);
+    color: var(--warn-ink);
+  }
+
+  .diag-summary.failed .diag-mark {
+    background: var(--bad-tint);
+    color: var(--bad-ink);
+  }
+
+  .diag-count {
+    font-family: var(--font-display);
+    font-size: 17px;
+    font-weight: var(--w-semibold);
+    color: var(--ink);
+  }
+
   input.clock {
     @apply h-8 rounded-control border-0 bg-fill-soft px-2.5 text-ink;
     font-size: 13px;

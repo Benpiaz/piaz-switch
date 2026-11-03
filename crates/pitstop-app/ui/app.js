@@ -101,6 +101,10 @@ const ICONS = {
     '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.6 12 3.6 12 3.6s-7.5 0-9.4.5A3 3 0 0 0 .5 6.2 31 31 0 0 0 0 12a31 31 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.1c1.9.5 9.4.5 9.4.5s7.5 0 9.4-.5a3 3 0 0 0 2.1-2.1A31 31 0 0 0 24 12a31 31 0 0 0-.5-5.8ZM9.6 15.6V8.4l6.2 3.6-6.2 3.6Z"/></svg>',
   xlogo:
     '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>',
+  back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg>',
+  pulse:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2.5-6 5 12 2.5-6h4"/></svg>',
+  copy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="8.5" y="8.5" width="12" height="12" rx="2.5"/><path d="M15.5 8.5V6a2.5 2.5 0 0 0-2.5-2.5H6A2.5 2.5 0 0 0 3.5 6v7A2.5 2.5 0 0 0 6 15.5h2.5"/></svg>',
   mark: '<svg viewBox="0 0 32 32"><rect width="32" height="32" rx="9" fill="currentColor"/><g fill="none" stroke="#fff" stroke-width="2.3" stroke-linecap="round"><circle cx="16" cy="17.6" r="7.4"/><path d="M16 17.6v-4.4M16 17.6l3.1 2.2M13.4 6.6h5.2M16 6.6v3.4"/></g></svg>',
 };
 
@@ -382,7 +386,7 @@ function renderNav() {
         "button",
         {
           class: "nav-item",
-          "aria-current": pane === id ? "page" : null,
+          "aria-current": pane === id || (id === "settings" && SUBPAGES.includes(pane)) ? "page" : null,
           title: sidebarCollapsed ? label : null,
           onclick: () => {
             pane = id;
@@ -434,6 +438,10 @@ function renderHead() {
     renderUsageHead();
     return;
   }
+  if (SUBPAGES.includes(pane)) {
+    renderSubpageHead();
+    return;
+  }
   const accounts = pane === "accounts";
   document.getElementById("title").textContent = accounts ? t("accounts") : t("settings");
   const status = document.getElementById("status");
@@ -467,7 +475,17 @@ function renderPane() {
   const focusKey = focusKeyOf(document.activeElement);
   const scrollTop = shownPane === pane ? root.scrollTop : 0;
   const moves = []; // bar movements to start once the rows are in the page
-  root.replaceChildren(pane === "settings" ? renderSettings() : pane === "usage" ? renderUsage(moves) : renderAccounts(moves));
+  root.replaceChildren(
+    pane === "settings"
+      ? renderSettings()
+      : pane === "usage"
+        ? renderUsage(moves)
+        : pane === "activity"
+          ? renderActivity()
+          : pane === "diagnostics"
+            ? renderDiagnostics()
+            : renderAccounts(moves),
+  );
   shownPane = pane;
   root.scrollTop = scrollTop;
   refocus(root, focusKey);
@@ -1904,6 +1922,7 @@ function renderSettings() {
     ),
     automationGroups(),
     updateGroup(),
+    troubleshootGroup(),
     h(
       "section",
       { class: "group" },
@@ -2012,6 +2031,18 @@ function automationGroups() {
     },
     Array.from({ length: 11 }, (_, i) => 50 + i * 5).map((n) => h("option", { value: String(n), selected: n === a.autoSwitchAt }, `${n}%`)),
   );
+  const order = a.useFirst || "mostLeft";
+  const useFirst = h(
+    "select",
+    {
+      "aria-label": t("useFirst"),
+      onchange: (event) => changeSetting({ useFirst: event.target.value }),
+    },
+    [
+      ["mostLeft", t("useFirstMostLeft")],
+      ["resetsSoonest", t("useFirstResetsSoonest")],
+    ].map(([value, label]) => h("option", { value, selected: value === order }, label)),
+  );
   const automatic = h(
     "section",
     { class: "group" },
@@ -2030,6 +2061,17 @@ function automationGroups() {
         { class: "setting-row" + (a.autoSwitch ? "" : " muted") },
         h("div", { class: "setting-name", text: t("autoSwitchAt") }),
         h("span", { class: "select" }, keyed(threshold, "auto-switch-at")),
+      ),
+      h(
+        "div",
+        { class: "setting-row" },
+        h(
+          "div",
+          null,
+          h("div", { class: "setting-name", text: t("useFirst") }),
+          h("p", { class: "help", text: t(order === "resetsSoonest" ? (a.autoSwitch ? "useFirstResetsSoonestHelp" : "useFirstResetsSoonestOffHelp") : "useFirstMostLeftHelp") }),
+        ),
+        h("span", { class: "select" }, keyed(useFirst, "use-first")),
       ),
       h(
         "div",
@@ -2079,6 +2121,289 @@ function automationGroups() {
   return [automatic, warmUp];
 }
 
+// ---------- settings: troubleshoot (diagnostics, activity) ----------
+
+/** Pages of Settings, with a way back to it. */
+const SUBPAGES = ["diagnostics", "activity"];
+let activity = null; // the log, newest first, once read
+let activityFailed = null;
+let activityLoading = false;
+let diagnostics = null; // the last report
+let diagnosing = false;
+let diagnosticsFailed = null;
+
+function troubleshootGroup() {
+  const row = (id, iconName, name, help) =>
+    h(
+      "div",
+      { class: "setting-row" },
+      h("div", null, h("div", { class: "setting-name", text: name }), h("p", { class: "help", text: help })),
+      keyed(h("button", { class: "button compact", onclick: () => openSubpage(id) }, icon(iconName), t("open")), `open-${id}`),
+    );
+  return h(
+    "section",
+    { class: "group" },
+    h("h2", { class: "group-head", text: t("troubleshoot") }),
+    h("div", { class: "panel" }, row("diagnostics", "pulse", t("diagnostics"), t("diagnosticsHelp")), row("activity", "clock", t("activity"), t("activityHelp"))),
+  );
+}
+
+function openSubpage(id) {
+  pane = id;
+  render();
+  if (id === "activity") loadActivity();
+  else loadDiagnostics();
+  const back = document.querySelector('[data-focus="subpage-back"]');
+  if (back) back.focus();
+}
+
+function leaveSubpage() {
+  const from = pane;
+  pane = "settings";
+  render();
+  const opener = document.querySelector(`[data-focus="open-${from}"]`);
+  if (opener) opener.focus();
+}
+
+function renderSubpageHead() {
+  const title = pane === "activity" ? t("activity") : t("diagnostics");
+  document.getElementById("title").textContent = title;
+  const status = document.getElementById("status");
+  const at = pane === "diagnostics" && diagnostics ? diagnostics.checkedAt : null;
+  status.replaceChildren(...(at ? [h("span", { text: t("checkedAt", { time: clockTime(at) }) })] : []));
+  const back = h("button", { class: "button ghost compact", title: `${t("backToSettings")} (${isMac ? "⌥←" : "Alt+←"})`, onclick: leaveSubpage }, icon("back"), t("settings"));
+  const busy = pane === "activity" ? activityLoading : diagnosing;
+  const again = h(
+    "button",
+    {
+      class: "icon-button" + (busy ? " spinning" : ""),
+      title: pane === "activity" ? t("refresh") : t("checkAgain"),
+      "aria-label": pane === "activity" ? t("refresh") : t("checkAgain"),
+      disabled: busy,
+      onclick: () => (pane === "activity" ? loadActivity() : loadDiagnostics()),
+    },
+    icon("refresh"),
+  );
+  const items = [keyed(back, "subpage-back"), keyed(again, "subpage-again")];
+  if (pane === "diagnostics") {
+    items.push(keyed(h("button", { class: "button", disabled: !diagnostics, onclick: () => copy(reportText(diagnostics)) }, icon("copy"), t("copyReport")), "copy-report"));
+  }
+  document.getElementById("toolbar").replaceChildren(...items);
+}
+
+async function loadActivity() {
+  if (activityLoading) return;
+  activityLoading = true;
+  render();
+  try {
+    activity = await invoke("get_activity");
+    activityFailed = null;
+  } catch (error) {
+    activityFailed = error;
+  }
+  activityLoading = false;
+  render();
+}
+
+async function loadDiagnostics() {
+  if (diagnosing) return;
+  diagnosing = true;
+  render();
+  try {
+    diagnostics = await invoke("run_diagnostics");
+    diagnosticsFailed = null;
+  } catch (error) {
+    diagnosticsFailed = error;
+  }
+  diagnosing = false;
+  render();
+}
+
+function toolName(id) {
+  const tool = toolOf(id);
+  return tool ? tool.name : id === "piaz-switch" ? APP_NAME : id;
+}
+
+/** A day heading for the log: Today, Yesterday, or the date. */
+function dayOf(at) {
+  const day = new Date(at * 1000);
+  const today = new Date();
+  const start = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.round((start(today) - start(day)) / 86400000);
+  if (days === 0) return t("today");
+  if (days === 1) return t("yesterday");
+  return day.toLocaleDateString(LANG === "vi" ? "vi-VN" : "en-GB", { weekday: "short", day: "numeric", month: "short", year: day.getFullYear() === today.getFullYear() ? undefined : "numeric" });
+}
+
+/** What a logged change did, as a sentence. */
+function changeText(entry) {
+  const key = {
+    use: "logUse",
+    "auto-switch": "logAutoSwitch",
+    enroll: "logEnroll",
+    "sign-in": "logSignIn",
+    "sign-in-again": "logSignInAgain",
+    rename: "logRename",
+    forget: "logForget",
+    renew: "logRenew",
+    "warm-up": "logWarmUp",
+  }[entry.verb];
+  const params = { name: entry.account || "", from: entry.from || "" };
+  return key ? t(key, params) : `${entry.verb} ${entry.account || ""}`.trim();
+}
+
+/** Why the app switched by itself, from the log's `detail`. */
+function switchWhy(entry) {
+  if (!entry.detail) return "";
+  const [kind, a, b] = entry.detail.split("|");
+  if (kind === "limit") return t("logWhyLimit", { from: entry.from || "", percent: b, window: windowName(a, true) });
+  if (kind === "resetsFirst") return Number(a) ? t("logWhyResetsFirst", { time: `${dayOf(Number(a))} ${clockTime(Number(a))}` }) : t("logWhyNoWeek");
+  return "";
+}
+
+/** A failed change's outcome code, in words where the window has them. */
+function resultText(code, verb) {
+  const warm = t("warmWhy_" + code);
+  if (verb === "warm-up" && warm !== "warmWhy_" + code) return warm;
+  const own = t("result_" + code);
+  if (own !== "result_" + code) return own;
+  if (warm !== "warmWhy_" + code) return warm;
+  return t("resultOther", { code });
+}
+
+function activityRow(entry) {
+  const auto = entry.verb === "auto-switch";
+  const iconName = { use: "swap", "auto-switch": "swap", renew: "refresh", "warm-up": "flame", rename: "tag", forget: "trash" }[entry.verb] || "user";
+  const bits = [];
+  if (entry.provider) bits.push(toolName(entry.provider));
+  if ((entry.verb === "use" || auto) && entry.from) bits.push(t("logFrom", { name: entry.from }));
+  const why = auto ? switchWhy(entry) : "";
+  if (why) bits.push(why);
+  bits.push(entry.by === "cli" ? t("logByCli") : auto || ["renew", "warm-up"].includes(entry.verb) ? t("logByItself") : t("logByApp"));
+  const failed = entry.result !== "done";
+  return h(
+    "div",
+    { class: "setting-row log-row" },
+    h("span", { class: "log-icon" + (failed ? " failed" : auto ? " auto" : ""), "aria-hidden": "true" }, icon(failed ? "warning" : iconName)),
+    h(
+      "div",
+      { class: "log-text" },
+      h("div", { class: "setting-name", text: changeText(entry) }),
+      h("p", { class: "help", text: bits.join(" · ") }),
+      failed ? h("span", { class: "chip warn", text: resultText(entry.result, entry.verb) }) : null,
+    ),
+    h("time", { class: "log-time", datetime: new Date(entry.at * 1000).toISOString(), text: clockTime(entry.at) }),
+  );
+}
+
+function renderActivity() {
+  if (activityFailed && !activity) {
+    return empty({ iconName: "error", tone: "error", title: t("activityFailed"), detail: errorText(activityFailed), action: button(t("tryAgain"), loadActivity) });
+  }
+  if (!activity) return h("div", { class: "settings" }, h("p", { class: "help", text: t("reading") }));
+  if (!activity.length) return empty({ iconName: "clock", title: t("activityEmpty"), detail: t("activityEmptyDetail") });
+  const days = [];
+  for (const entry of activity) {
+    const day = dayOf(entry.at);
+    if (!days.length || days[days.length - 1].day !== day) days.push({ day, entries: [] });
+    days[days.length - 1].entries.push(entry);
+  }
+  return h(
+    "div",
+    { class: "settings" },
+    h("p", { class: "help page-intro", text: t("activityIntro") }),
+    days.map(({ day, entries }) => h("section", { class: "group" }, h("h2", { class: "group-head", text: day }), h("div", { class: "panel" }, entries.map(activityRow)))),
+  );
+}
+
+/** A check in words: what it found, and a line under it. */
+function checkText(check) {
+  const p = { name: check.subject || "", tool: toolName(check.group), n: check.subject || "0", path: check.subject || "", code: check.finding };
+  const k = `${check.id}_${check.finding}`;
+  const known = t("check_" + k, p);
+  const title = known !== "check_" + k ? known : t(`check_${check.id}_failed`, p);
+  const sub = t("checkHelp_" + k, p);
+  let detail = sub !== "checkHelp_" + k ? sub : "";
+  if (!detail && check.level !== "ok") detail = t("checkCode", p);
+  if (!detail && check.id === "program") detail = check.subject || "";
+  if (!detail && check.id === "folder") detail = check.subject || "";
+  return { title, detail };
+}
+
+/** The button that mends a check, where the window has one. */
+function checkFix(check) {
+  const tool = toolOf(check.group);
+  const account = tool && check.subject ? tool.accounts.find((a) => a.name === check.subject) : null;
+  if (check.level === "ok") return null;
+  // Without the vault key a sign-in has nowhere to be kept: the key check says what to do.
+  if (["vaultKeyMissing", "keystore"].includes(check.finding)) return null;
+  if ((check.id === "parked" || (check.id === "usage" && ["refused", "expired"].includes(check.finding))) && tool && account) {
+    return button(t("signInAgainShort"), () => openSignInAgain(tool, account));
+  }
+  if (check.id === "login" && check.finding === "unmanaged" && tool) return button(t("nameIt"), () => openName(tool.id));
+  if (check.id === "usage") return button(t("refresh"), () => invoke("refresh", { usage: true }).then(() => setTimeout(loadDiagnostics, 1500)));
+  return null;
+}
+
+function renderDiagnostics() {
+  const report = diagnostics;
+  if (!report && diagnosticsFailed && !diagnosing) {
+    return empty({ iconName: "error", tone: "error", title: t("couldntCheck"), detail: errorText(diagnosticsFailed), action: button(t("tryAgain"), loadDiagnostics) });
+  }
+  if (!report) return h("div", { class: "settings" }, h("p", { class: "help", text: t("checking") }));
+  const issues = report.warnings + report.failures;
+  const summary = h(
+    "div",
+    { class: "panel diag-summary" + (report.failures ? " failed" : issues ? " warned" : " passed") },
+    h("span", { class: "diag-mark", "aria-hidden": "true" }, icon(report.failures ? "error" : issues ? "warning" : "check")),
+    h(
+      "div",
+      null,
+      h("div", { class: "diag-count", text: issues ? t(issues === 1 ? "issuesOne" : "issuesMany", { n: issues }) : t("noIssues") }),
+      h("p", { class: "help", text: report.failures ? t(report.failures === 1 ? "diagFailedOne" : "diagFailedMany") : issues ? t("diagWarned") : t("diagPassed") }),
+    ),
+  );
+  const groups = [];
+  for (const check of report.checks) {
+    if (!groups.length || groups[groups.length - 1].id !== check.group) groups.push({ id: check.group, checks: [] });
+    groups[groups.length - 1].checks.push(check);
+  }
+  const row = (check) => {
+    const { title, detail } = checkText(check);
+    const fix = checkFix(check);
+    return h(
+      "div",
+      { class: "setting-row diag-row" },
+      h("span", { class: "diag-level " + check.level, role: "img", "aria-label": t("level_" + check.level) }, icon(check.level === "ok" ? "check" : check.level === "warn" ? "warning" : "error")),
+      h("div", { class: "log-text" }, h("div", { class: "setting-name", text: title }), detail ? h("p", { class: "help selectable", text: detail }) : null),
+      fix ? keyed(fix, `fix-${check.group}-${check.id}-${check.subject || ""}`) : null,
+    );
+  };
+  return h(
+    "div",
+    { class: "settings" },
+    summary,
+    groups.map((g) => h("section", { class: "group" }, h("h2", { class: "group-head", text: toolName(g.id) }), h("div", { class: "panel" }, g.checks.map(row)))),
+  );
+}
+
+/** The report Copy Report puts on the clipboard: codes, not words, so it
+ * reads the same in any language; no email, paths start with `~`. */
+function reportText(report) {
+  if (!report) return "";
+  const lines = [`${APP_NAME} ${report.version} · ${report.system}`, `Checked ${new Date(report.checkedAt * 1000).toISOString()}`, `${report.warnings} warning(s), ${report.failures} failure(s)`];
+  let group = null;
+  for (const check of report.checks) {
+    if (check.group !== group) {
+      group = check.group;
+      lines.push("", group);
+    }
+    const level = { ok: "ok  ", warn: "warn", fail: "FAIL" }[check.level] || check.level;
+    lines.push(`  ${level}  ${check.id}: ${check.finding}${check.subject ? ` (${check.subject})` : ""}`);
+  }
+  return lines.join("\n");
+}
+
 function noticeAutoSwitched(event) {
   pushNotice({ id: "switched", kind: "success", icon: "swap", title: event.title, lines: [event.why] });
 }
@@ -2091,6 +2416,12 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     if (menuEl) closeMenu();
     else if (dialog) escapeDialog();
+    else if (SUBPAGES.includes(pane) && !event.target.closest("select")) leaveSubpage();
+    return;
+  }
+  if (event.altKey && event.key === "ArrowLeft" && SUBPAGES.includes(pane) && !dialog) {
+    event.preventDefault();
+    leaveSubpage();
     return;
   }
   if (event.key === "Tab" && dialog) {
@@ -2101,6 +2432,8 @@ document.addEventListener("keydown", (event) => {
     event.preventDefault();
     if (dialog) return;
     if (pane === "usage") refreshUsage();
+    else if (pane === "activity") loadActivity();
+    else if (pane === "diagnostics") loadDiagnostics();
     else invoke("refresh", { usage: true });
   } else if (mod && key === "n") {
     event.preventDefault();

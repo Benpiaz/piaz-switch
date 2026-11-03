@@ -356,8 +356,31 @@ pub fn warm_standing(
     WarmStanding::Due
 }
 
+/// Which account an automatic switch goes to, and the one offered once an
+/// account runs out, among those with room.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum UseFirst {
+    /// The one with the most room in the limit that ran low.
+    #[default]
+    MostLeft,
+    /// The one whose week resets first: what an account leaves of its week
+    /// is lost at its reset, so that is spent first. One without a weekly
+    /// limit (a Team seat) loses what it leaves every five hours, and comes
+    /// before them all.
+    ResetsSoonest,
+}
+
+/// Resets less than this far apart count as one.
+pub const SAME_RESET: i64 = 60;
+
+/// How long after any switch, by hand or by itself, the app makes none
+/// before a limit is reached.
+pub const EARLY_QUIET: i64 = 5 * 60;
+
 /// An automatic switch to make: Claude Code's account in use, `from`, has
-/// reached the threshold on `limit`, and `to` has the most of it left.
+/// reached the threshold on `limit`, and `to` comes first among the others;
+/// or, with `early`, no limit is reached yet but `to`'s week resets first.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SwitchPlan {
     pub from: String,
@@ -365,54 +388,282 @@ pub struct SwitchPlan {
     pub limit: String,
     pub percent: f64,
     pub resets_at: Option<i64>,
+    pub early: Option<Early>,
+}
+
+/// A switch before the threshold, to spend first the week that resets first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Early {
+    /// When `to`'s week resets; none when it has no weekly limit.
+    pub to_resets: Option<i64>,
+    /// When `from`'s week resets, where known.
+    pub from_resets: Option<i64>,
 }
 
 impl SwitchPlan {
-    /// Names this limit until it resets, to count attempts and notices by.
+    /// Names this limit until it resets, to count attempts and notices by;
+    /// an early switch is named by the account and week it goes to.
     pub fn key(&self, provider: &str) -> String {
-        format!(
-            "{provider}|{}|{}|{}",
-            self.from,
-            self.limit,
-            self.resets_at.unwrap_or(0)
-        )
+        match self.early {
+            Some(early) => format!(
+                "{provider}|{}|early|{}|{}",
+                self.from,
+                self.to,
+                early.to_resets.unwrap_or(0)
+            ),
+            None => format!(
+                "{provider}|{}|{}|{}",
+                self.from,
+                self.limit,
+                self.resets_at.unwrap_or(0)
+            ),
+        }
     }
 }
 
+/// Names an account's week, for the switches made to it before the
+/// threshold: one per week, and none once the user leaves it.
+pub fn early_key(name: &str, week_resets: Option<i64>) -> String {
+    format!("{name}|{}", week_resets.unwrap_or(0))
+}
+
+/// The weekly limit for all models.
+fn week(windows: &[WindowView]) -> Option<&WindowView> {
+    windows.iter().find(|w| w.label == "week")
+}
+
+/// Where an account's week stands for ordering by reset: none at all comes
+/// first, then a known reset, then one past or unknown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WeekReset {
+    None,
+    At(i64),
+    Unknown,
+}
+
+fn week_reset(windows: &[WindowView], now: i64) -> WeekReset {
+    match week(windows) {
+        None => WeekReset::None,
+        Some(w) => match w.resets_at.filter(|&at| at > now) {
+            Some(at) => WeekReset::At(at),
+            None => WeekReset::Unknown,
+        },
+    }
+}
+
+impl WeekReset {
+    fn at(self) -> Option<i64> {
+        match self {
+            WeekReset::At(at) => Some(at),
+            _ => None,
+        }
+    }
+
+    fn order(self, other: Self) -> std::cmp::Ordering {
+        use std::cmp::Ordering;
+        let class = |w: Self| match w {
+            WeekReset::None => 0,
+            WeekReset::At(_) => 1,
+            WeekReset::Unknown => 2,
+        };
+        match (self, other) {
+            (WeekReset::At(a), WeekReset::At(b)) if (a - b).abs() < SAME_RESET => Ordering::Equal,
+            (WeekReset::At(a), WeekReset::At(b)) => a.cmp(&b),
+            _ => class(self).cmp(&class(other)),
+        }
+    }
+}
+
+/// An account that could be switched to, and what orders it.
+struct Candidate<'a> {
+    account: &'a AccountView,
+    /// Its use of the limit being ordered by; none of it counts as unused.
+    used: f64,
+    /// Its fullest other limit.
+    fullest: f64,
+    week: WeekReset,
+}
+
+fn candidate<'a>(account: &'a AccountView, limit: &str, now: i64) -> Option<Candidate<'a>> {
+    let windows = windows_of(account)?;
+    Some(Candidate {
+        account,
+        used: windows
+            .iter()
+            .find(|w| w.label == limit)
+            .map_or(0.0, |w| used_now(w, now)),
+        fullest: windows
+            .iter()
+            .filter(|w| w.label != limit)
+            .map(|w| used_now(w, now))
+            .fold(0.0, f64::max),
+        week: week_reset(windows, now),
+    })
+}
+
+/// The candidate that comes first by `order`.
+fn first<'a>(
+    candidates: impl Iterator<Item = Candidate<'a>>,
+    order: UseFirst,
+) -> Option<Candidate<'a>> {
+    candidates.min_by(|x, y| {
+        let room = x
+            .used
+            .total_cmp(&y.used)
+            .then(x.fullest.total_cmp(&y.fullest));
+        match order {
+            UseFirst::MostLeft => room,
+            UseFirst::ResetsSoonest => x.week.order(y.week).then(room),
+        }
+    })
+}
+
 /// Where Claude Code should go once a limit of the account in use reaches
-/// `threshold` percent: the account with the least of that limit used, among
-/// those with a reading and every limit under the threshold, so the switch
-/// never lands on an account that would have to switch straight back.
-pub fn switch_target(tool: &ToolView, threshold: u8, now: i64) -> Option<SwitchPlan> {
+/// `threshold` percent: by `order`, among the accounts with a reading and
+/// every limit under the threshold, so the switch never lands on an account
+/// that would have to switch straight back.
+pub fn switch_target(
+    tool: &ToolView,
+    threshold: u8,
+    order: UseFirst,
+    now: i64,
+) -> Option<SwitchPlan> {
     let threshold = f64::from(threshold);
     let active = tool.accounts.iter().find(|a| a.in_use)?;
     let full = windows_of(active)?
         .iter()
         .filter(|w| used_now(w, now) >= threshold)
         .max_by(|x, y| used_now(x, now).total_cmp(&used_now(y, now)))?;
-    let (to, _) = tool
-        .accounts
-        .iter()
-        .filter(|a| !a.in_use)
-        .filter_map(|a| {
-            let windows = windows_of(a)?;
-            if windows.iter().any(|w| used_now(w, now) >= threshold) {
-                return None;
-            }
-            let used = windows
-                .iter()
-                .find(|w| w.label == full.label)
-                .map_or(0.0, |w| used_now(w, now));
-            Some((a, used))
-        })
-        .min_by(|x, y| x.1.total_cmp(&y.1))?;
+    let to = first(
+        tool.accounts
+            .iter()
+            .filter(|a| !a.in_use)
+            .filter(|a| {
+                windows_of(a).is_some_and(|ws| ws.iter().all(|w| used_now(w, now) < threshold))
+            })
+            .filter_map(|a| candidate(a, &full.label, now)),
+        order,
+    )?;
     Some(SwitchPlan {
         from: active.name.clone(),
-        to: to.name.clone(),
+        to: to.account.name.clone(),
         limit: full.label.clone(),
         percent: used_now(full, now),
         resets_at: full.resets_at,
+        early: None,
     })
+}
+
+/// Under [`UseFirst::ResetsSoonest`], a switch before any limit of the
+/// account in use reaches `threshold`: to the first account, by that order,
+/// that comes before it (no weekly limit while it has one, or a week that
+/// resets over a minute sooner), has every limit under the threshold, has
+/// used no more of its five hours, and wasn't switched to early this week or
+/// left by hand (`spent`, by [`early_key`]). Never between two accounts
+/// without a weekly limit.
+pub fn early_target(
+    tool: &ToolView,
+    threshold: u8,
+    spent: &HashSet<String>,
+    now: i64,
+) -> Option<SwitchPlan> {
+    let threshold = f64::from(threshold);
+    let active = tool.accounts.iter().find(|a| a.in_use)?;
+    let windows = windows_of(active)?;
+    if windows.iter().any(|w| used_now(w, now) >= threshold) {
+        return None;
+    }
+    let from_week = week_reset(windows, now);
+    if from_week == WeekReset::None {
+        return None;
+    }
+    let five_hours = |ws: &[WindowView]| {
+        ws.iter()
+            .find(|w| w.label == "5h")
+            .map_or(0.0, |w| used_now(w, now))
+    };
+    let from_five = five_hours(windows);
+    let to = first(
+        tool.accounts
+            .iter()
+            .filter(|a| !a.in_use)
+            .filter(|a| {
+                let Some(ws) = windows_of(a) else {
+                    return false;
+                };
+                let week = week_reset(ws, now);
+                let sooner = match (week, from_week) {
+                    (WeekReset::None, _) => true,
+                    (WeekReset::At(to), WeekReset::At(from)) => to < from - SAME_RESET,
+                    _ => false,
+                };
+                sooner
+                    && ws.iter().all(|w| used_now(w, now) < threshold)
+                    && five_hours(ws) <= from_five
+                    && !spent.contains(&early_key(&a.name, week.at()))
+            })
+            .filter_map(|a| candidate(a, "5h", now)),
+        UseFirst::ResetsSoonest,
+    )?;
+    Some(SwitchPlan {
+        from: active.name.clone(),
+        to: to.account.name.clone(),
+        limit: "week".into(),
+        percent: from_five,
+        resets_at: to.week.at(),
+        early: Some(Early {
+            to_resets: to.week.at(),
+            from_resets: from_week.at(),
+        }),
+    })
+}
+
+/// When `account`'s week resets, by its last reading; none without one.
+pub fn week_resets(account: &AccountView, now: i64) -> Option<i64> {
+    windows_of(account).and_then(|ws| week_reset(ws, now).at())
+}
+
+/// A week, in seconds.
+const WEEK: i64 = 7 * 86_400;
+
+/// The accounts not to switch to before the threshold, by [`early_key`],
+/// read from the activity log so a restart or the command line forgets
+/// nothing: those switched to early in their current week, and those the
+/// user switched away from in it, unless the account reached the threshold
+/// while in use since (it is then switched back to once it has room). An
+/// account without a weekly limit counts its last five hours as its week.
+pub fn early_spent(
+    log: &[pitstop_core::activity::Entry],
+    tool: &ToolView,
+    now: i64,
+) -> HashSet<String> {
+    use pitstop_core::activity::verb;
+    let mut spent = HashSet::new();
+    for account in &tool.accounts {
+        let week = week_resets(account, now);
+        let since = week.map_or(now - PERIOD, |at| at - WEEK);
+        let name = account.name.as_str();
+        // Newest first: the last thing that happened in the week decides.
+        let last = log
+            .iter()
+            .filter(|e| e.at >= since && e.worked() && e.provider.as_deref() == Some(tool.id))
+            .find_map(|e| {
+                let early = e
+                    .detail
+                    .as_deref()
+                    .is_some_and(|d| d.starts_with("resetsFirst|"));
+                match e.verb.as_str() {
+                    verb::AUTO_SWITCH if e.account.as_deref() == Some(name) && early => Some(true),
+                    verb::USE if e.from.as_deref() == Some(name) => Some(true),
+                    verb::AUTO_SWITCH if e.from.as_deref() == Some(name) && !early => Some(false),
+                    _ => None,
+                }
+            });
+        if last == Some(true) {
+            spent.insert(early_key(name, week));
+        }
+    }
+    spent
 }
 
 fn windows_of(account: &AccountView) -> Option<&[WindowView]> {
@@ -853,7 +1104,7 @@ mod tests {
             ),
             account("ben5", false, Some(UsageView::Unauthorized)),
         ]);
-        let plan = switch_target(&tool, 90, NOW).unwrap();
+        let plan = switch_target(&tool, 90, UseFirst::MostLeft, NOW).unwrap();
         assert_eq!(
             (plan.from.as_str(), plan.to.as_str(), plan.limit.as_str()),
             ("ben1", "ben2", "5h")
@@ -867,13 +1118,13 @@ mod tests {
             account("ben1", true, ok(vec![window("5h", 89.0, Some(600))])),
             account("ben2", false, ok(vec![window("5h", 10.0, None)])),
         ]);
-        assert_eq!(switch_target(&below, 90, NOW), None);
+        assert_eq!(switch_target(&below, 90, UseFirst::MostLeft, NOW), None);
         let nobody = claude(vec![
             account("ben1", true, ok(vec![window("5h", 95.0, Some(600))])),
             account("ben2", false, ok(vec![window("5h", 92.0, Some(900))])),
             account("ben3", false, None),
         ]);
-        assert_eq!(switch_target(&nobody, 90, NOW), None);
+        assert_eq!(switch_target(&nobody, 90, UseFirst::MostLeft, NOW), None);
     }
 
     #[test]
@@ -897,7 +1148,7 @@ mod tests {
             ),
             account("ben3", false, ok(vec![window("5h", 50.0, None)])),
         ]);
-        let plan = switch_target(&tool, 90, NOW).unwrap();
+        let plan = switch_target(&tool, 90, UseFirst::MostLeft, NOW).unwrap();
         assert_eq!((plan.limit.as_str(), plan.to.as_str()), ("week", "ben3"));
     }
 
@@ -941,7 +1192,7 @@ mod tests {
             to: "ben2".into(),
             window: "5h".into(),
         }];
-        let plan = switch_target(&tools[0], 90, NOW).unwrap();
+        let plan = switch_target(&tools[0], 90, UseFirst::MostLeft, NOW).unwrap();
         let handled: HashSet<String> = [plan.key("claude-code")].into();
         assert!(run_out_notices(&tools, &suggestions, &handled, NOW).is_empty());
     }
@@ -969,7 +1220,7 @@ mod tests {
                 ]),
             ),
         ]);
-        assert_eq!(switch_target(&tool, 90, NOW), None);
+        assert_eq!(switch_target(&tool, 90, UseFirst::MostLeft, NOW), None);
     }
 
     #[test]
@@ -1069,7 +1320,7 @@ mod tests {
             account("ben1", true, ok(vec![window("5h", 100.0, Some(-60))])),
             account("ben2", false, ok(vec![window("5h", 10.0, None)])),
         ]);
-        assert_eq!(switch_target(&tool, 90, NOW), None);
+        assert_eq!(switch_target(&tool, 90, UseFirst::MostLeft, NOW), None);
         let suggestions = vec![Suggestion {
             provider: "claude-code",
             from: "ben1".into(),
@@ -1086,9 +1337,232 @@ mod tests {
             account("ben2", false, ok(vec![window("5h", 98.0, Some(-30))])),
         ]);
         assert_eq!(
-            switch_target(&tool, 90, NOW).map(|p| p.to),
+            switch_target(&tool, 90, UseFirst::MostLeft, NOW).map(|p| p.to),
             Some("ben2".to_string())
         );
+    }
+
+    // ---- use first: resets soonest
+
+    fn logged(
+        at: i64,
+        verb: &str,
+        to: &str,
+        from: &str,
+        detail: Option<&str>,
+    ) -> pitstop_core::activity::Entry {
+        let mut entry =
+            pitstop_core::activity::Entry::new(at, verb, pitstop_core::activity::By::App)
+                .provider(pitstop_core::ProviderId::ClaudeCode)
+                .account(to)
+                .from(Some(from));
+        if let Some(detail) = detail {
+            entry = entry.detail(detail);
+        }
+        entry
+    }
+
+    #[test]
+    fn an_account_without_a_week_counts_its_last_five_hours_as_one() {
+        use pitstop_core::activity::verb;
+        let tool = claude(vec![
+            weekly("ben1", true, 40.0, 30.0, 5 * 86_400),
+            account("seat", false, ok(vec![window("5h", 10.0, Some(3600))])),
+        ]);
+        let left = |ago| vec![logged(NOW - ago, verb::USE, "ben1", "seat", None)];
+        // Left by hand an hour ago: not switched back to early.
+        assert_eq!(
+            early_spent(&left(3600), &tool, NOW),
+            [early_key("seat", None)].into()
+        );
+        // Six hours ago: its five hours since then were lost anyway.
+        assert!(early_spent(&left(6 * 3600), &tool, NOW).is_empty());
+    }
+
+    #[test]
+    fn the_log_says_which_accounts_were_switched_to_early_or_left_this_week() {
+        use pitstop_core::activity::verb;
+        let tool = claude(vec![
+            weekly("ben1", true, 40.0, 30.0, 5 * 86_400),
+            weekly("ben2", false, 0.0, 10.0, 2 * 86_400),
+            weekly("ben3", false, 0.0, 10.0, 3 * 86_400),
+            weekly("ben4", false, 0.0, 10.0, 4 * 86_400),
+        ]);
+        // Newest first, as the log reads.
+        let log = vec![
+            // ben3 was switched to early, then reached the threshold in use.
+            logged(
+                NOW - 100,
+                verb::AUTO_SWITCH,
+                "ben1",
+                "ben3",
+                Some("limit|5h|91"),
+            ),
+            logged(
+                NOW - 3_000,
+                verb::AUTO_SWITCH,
+                "ben3",
+                "ben1",
+                Some("resetsFirst|1|2"),
+            ),
+            // The user left ben2 by hand.
+            logged(NOW - 4_000, verb::USE, "ben1", "ben2", None),
+            // ben4 was switched to early last week: that week is over.
+            logged(
+                NOW - 5 * 86_400,
+                verb::AUTO_SWITCH,
+                "ben4",
+                "ben1",
+                Some("resetsFirst|1|2"),
+            ),
+            // A switch that failed counts for nothing.
+            logged(NOW - 200, verb::USE, "ben3", "ben4", None).result("vaultCorrupt"),
+        ];
+        let spent = early_spent(&log, &tool, NOW);
+        assert_eq!(spent, [early_key("ben2", Some(NOW + 2 * 86_400))].into());
+        assert_eq!(
+            early_target(&tool, 90, &spent, NOW).map(|p| p.to),
+            Some("ben3".to_string())
+        );
+    }
+
+    fn weekly(name: &str, in_use: bool, five: f64, week_pct: f64, resets_in: i64) -> AccountView {
+        account(
+            name,
+            in_use,
+            ok(vec![
+                window("5h", five, Some(3600)),
+                window("week", week_pct, Some(resets_in)),
+            ]),
+        )
+    }
+
+    #[test]
+    fn resets_soonest_switches_to_the_week_that_resets_first_not_the_emptiest() {
+        let tool = claude(vec![
+            weekly("ben1", true, 92.0, 40.0, 5 * 86_400),
+            weekly("ben2", false, 10.0, 20.0, 4 * 86_400),
+            weekly("ben3", false, 30.0, 60.0, 86_400),
+        ]);
+        let most_left = switch_target(&tool, 90, UseFirst::MostLeft, NOW).unwrap();
+        assert_eq!(most_left.to, "ben2");
+        let soonest = switch_target(&tool, 90, UseFirst::ResetsSoonest, NOW).unwrap();
+        assert_eq!(
+            (soonest.to.as_str(), soonest.limit.as_str()),
+            ("ben3", "5h")
+        );
+        assert_eq!(soonest.early, None);
+    }
+
+    #[test]
+    fn resets_soonest_puts_an_account_without_a_week_first_and_an_unknown_reset_last() {
+        let tool = claude(vec![
+            weekly("ben1", true, 95.0, 40.0, 5 * 86_400),
+            account("seat", false, ok(vec![window("5h", 50.0, Some(3600))])),
+            weekly("ben3", false, 30.0, 60.0, 86_400),
+        ]);
+        let plan = switch_target(&tool, 90, UseFirst::ResetsSoonest, NOW).unwrap();
+        assert_eq!(plan.to, "seat");
+
+        let unknown = claude(vec![
+            weekly("ben1", true, 95.0, 40.0, 5 * 86_400),
+            account(
+                "ben2",
+                false,
+                ok(vec![window("5h", 0.0, None), window("week", 10.0, None)]),
+            ),
+            weekly("ben3", false, 30.0, 60.0, 6 * 86_400),
+        ]);
+        let plan = switch_target(&unknown, 90, UseFirst::ResetsSoonest, NOW).unwrap();
+        assert_eq!(plan.to, "ben3");
+    }
+
+    #[test]
+    fn resets_a_minute_apart_count_as_one_and_room_decides() {
+        let tool = claude(vec![
+            weekly("ben1", true, 95.0, 40.0, 5 * 86_400),
+            weekly("ben2", false, 60.0, 20.0, 86_400),
+            weekly("ben3", false, 10.0, 60.0, 86_400 + 30),
+        ]);
+        let plan = switch_target(&tool, 90, UseFirst::ResetsSoonest, NOW).unwrap();
+        assert_eq!(plan.to, "ben3");
+    }
+
+    #[test]
+    fn an_early_switch_goes_to_the_week_that_resets_first_with_room() {
+        let tool = claude(vec![
+            weekly("ben1", true, 40.0, 30.0, 5 * 86_400),
+            weekly("ben2", false, 0.0, 10.0, 6 * 86_400),
+            weekly("ben3", false, 20.0, 70.0, 2 * 86_400),
+        ]);
+        let plan = early_target(&tool, 90, &HashSet::new(), NOW).unwrap();
+        assert_eq!((plan.from.as_str(), plan.to.as_str()), ("ben1", "ben3"));
+        assert_eq!(
+            plan.early,
+            Some(Early {
+                to_resets: Some(NOW + 2 * 86_400),
+                from_resets: Some(NOW + 5 * 86_400),
+            })
+        );
+        assert!(plan.key("claude-code").contains("|early|ben3|"));
+    }
+
+    #[test]
+    fn no_early_switch_to_one_used_more_in_five_hours_near_the_threshold_or_spent() {
+        // ben3's week resets first, but it has used more of its five hours.
+        let busier = claude(vec![
+            weekly("ben1", true, 10.0, 30.0, 5 * 86_400),
+            weekly("ben3", false, 20.0, 70.0, 2 * 86_400),
+        ]);
+        assert_eq!(early_target(&busier, 90, &HashSet::new(), NOW), None);
+        // ben3's week is at the threshold.
+        let full = claude(vec![
+            weekly("ben1", true, 40.0, 30.0, 5 * 86_400),
+            weekly("ben3", false, 20.0, 90.0, 2 * 86_400),
+        ]);
+        assert_eq!(early_target(&full, 90, &HashSet::new(), NOW), None);
+        // Switched to early this week, or left by hand.
+        let fresh = claude(vec![
+            weekly("ben1", true, 40.0, 30.0, 5 * 86_400),
+            weekly("ben3", false, 20.0, 70.0, 2 * 86_400),
+        ]);
+        let spent: HashSet<String> = [early_key("ben3", Some(NOW + 2 * 86_400))].into();
+        assert_eq!(early_target(&fresh, 90, &spent, NOW), None);
+        // Next week it may be switched to again.
+        let spent: HashSet<String> = [early_key("ben3", Some(NOW - 5 * 86_400))].into();
+        assert!(early_target(&fresh, 90, &spent, NOW).is_some());
+    }
+
+    #[test]
+    fn no_early_switch_once_a_limit_is_reached_or_from_an_account_without_a_week() {
+        let reached = claude(vec![
+            weekly("ben1", true, 92.0, 30.0, 5 * 86_400),
+            weekly("ben3", false, 20.0, 70.0, 2 * 86_400),
+        ]);
+        assert_eq!(early_target(&reached, 90, &HashSet::new(), NOW), None);
+        let seat = claude(vec![
+            account("seat", true, ok(vec![window("5h", 40.0, Some(3600))])),
+            account("seat2", false, ok(vec![window("5h", 0.0, None)])),
+            weekly("ben3", false, 0.0, 10.0, 86_400),
+        ]);
+        assert_eq!(early_target(&seat, 90, &HashSet::new(), NOW), None);
+    }
+
+    #[test]
+    fn an_account_without_a_week_is_switched_to_early_and_a_minute_sooner_is_not_sooner() {
+        let tool = claude(vec![
+            weekly("ben1", true, 40.0, 30.0, 5 * 86_400),
+            account("seat", false, ok(vec![window("5h", 10.0, Some(3600))])),
+        ]);
+        let plan = early_target(&tool, 90, &HashSet::new(), NOW).unwrap();
+        assert_eq!(plan.to, "seat");
+        assert_eq!(plan.early.unwrap().to_resets, None);
+
+        let tie = claude(vec![
+            weekly("ben1", true, 40.0, 30.0, 86_400),
+            weekly("ben2", false, 0.0, 10.0, 86_400 - 30),
+        ]);
+        assert_eq!(early_target(&tie, 90, &HashSet::new(), NOW), None);
     }
 
     #[test]

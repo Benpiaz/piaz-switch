@@ -198,9 +198,6 @@
   .transform {
     transform: var(--tw-rotate-x,) var(--tw-rotate-y,) var(--tw-rotate-z,) var(--tw-skew-x,) var(--tw-skew-y,);
   }
-  .resize {
-    resize: both;
-  }
   .blur {
     --tw-blur: blur(8px);
     filter: var(--tw-blur,) var(--tw-brightness,) var(--tw-contrast,) var(--tw-grayscale,) var(--tw-hue-rotate,) var(--tw-invert,) var(--tw-saturate,) var(--tw-sepia,) var(--tw-drop-shadow,);
@@ -1342,6 +1339,102 @@
   }
   .span-dash {
     color: var(--ink-3);
+  }
+  .page-intro {
+    margin: 0 4px 14px;
+  }
+  .log-row, .diag-row {
+    justify-content: flex-start;
+    gap: 12px;
+  }
+  .log-text {
+    min-width: 0px;
+    flex: 1;
+  }
+  .log-text .chip {
+    margin-top: 6px;
+  }
+  .log-icon, .diag-level {
+    display: flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: var(--r-md);
+    background: var(--fill-soft);
+    color: var(--ink-2);
+  }
+  .log-icon svg, .diag-level svg {
+    width: 15px;
+    height: 15px;
+  }
+  .log-icon.auto {
+    background: var(--accent-tint);
+    color: var(--accent-ink);
+  }
+  .log-icon.failed, .diag-level.warn {
+    background: var(--warn-tint);
+    color: var(--warn-ink);
+  }
+  .diag-level.ok {
+    background: var(--ok-tint);
+    color: var(--ok-ink);
+  }
+  .diag-level.fail {
+    background: var(--bad-tint);
+    color: var(--bad-ink);
+  }
+  .log-time {
+    flex: none;
+    align-self: flex-start;
+    margin-top: 2px;
+    font-size: 13px;
+    color: var(--ink-2);
+    font-variant-numeric: tabular-nums;
+  }
+  .help.selectable {
+    user-select: text;
+    -webkit-user-select: text;
+    overflow-wrap: anywhere;
+  }
+  .diag-summary {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 22px;
+    padding: 16px;
+  }
+  .diag-mark {
+    display: flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: var(--r-lg);
+  }
+  .diag-mark svg {
+    width: 20px;
+    height: 20px;
+  }
+  .diag-summary.passed .diag-mark {
+    background: var(--ok-tint);
+    color: var(--ok-ink);
+  }
+  .diag-summary.warned .diag-mark {
+    background: var(--warn-tint);
+    color: var(--warn-ink);
+  }
+  .diag-summary.failed .diag-mark {
+    background: var(--bad-tint);
+    color: var(--bad-ink);
+  }
+  .diag-count {
+    font-family: var(--font-display);
+    font-size: 17px;
+    font-weight: var(--w-semibold);
+    color: var(--ink);
   }
   input.clock {
     height: calc(var(--spacing) * 8);

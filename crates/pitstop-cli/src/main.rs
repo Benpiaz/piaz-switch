@@ -2,7 +2,10 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use pitstop_core::activity::{self, verb, By, Entry};
+use pitstop_core::doctor::{self, Level};
 use pitstop_core::engine::{AccountUsage, RemoveOutcome, SwitchOutcome};
+use pitstop_core::live::Live;
 use pitstop_core::usage::Http;
 use pitstop_core::{signin, Engine, ProviderId, RealHost, State};
 
@@ -59,6 +62,15 @@ enum Command {
         #[arg(short, long)]
         provider: Option<String>,
     },
+    /// Show the last changes made to the accounts, from the app and here.
+    Log {
+        /// How many changes to show, newest first.
+        #[arg(short = 'n', long, default_value_t = 30)]
+        count: usize,
+    },
+    /// Check what Piaz Switch relies on: its folder, the vault key, each
+    /// tool's program, the login in use and every parked login.
+    Doctor,
 }
 
 fn parse_provider(s: Option<&str>) -> Result<Option<ProviderId>> {
@@ -109,6 +121,142 @@ fn print_list(state: &State, usage: &[AccountUsage]) {
     println!("\n(* = active)");
 }
 
+/// Record a change in the activity log; a log that can't be written stops
+/// nothing.
+fn record<T>(host: &RealHost, entry: Entry, result: &pitstop_core::error::Result<T>) {
+    let _ = activity::record(host, &entry.outcome(result));
+}
+
+/// The one tool an account name belongs to, when only one has it.
+fn owner(
+    engine: &Engine<RealHost>,
+    name: &str,
+    provider: Option<ProviderId>,
+) -> Option<ProviderId> {
+    let state = engine.state().ok()?;
+    let mut owners = state
+        .accounts
+        .iter()
+        .filter(|a| a.name == name && provider.is_none_or(|p| p == a.provider));
+    let first = owners.next()?.provider;
+    owners.next().is_none().then_some(first)
+}
+
+/// The account a tool is using before a switch: its login's owner, or the
+/// record when the login can't be read.
+fn in_use(engine: &Engine<RealHost>, provider: ProviderId) -> Option<String> {
+    match engine.live(provider) {
+        Ok(Live::Account(name)) => Some(name),
+        Ok(_) => None,
+        Err(_) => engine
+            .state()
+            .ok()
+            .and_then(|s| s.active_name(provider).cloned()),
+    }
+}
+
+fn print_log(host: &RealHost, count: usize) -> Result<()> {
+    let log = activity::recent(host, count)?;
+    if log.is_empty() {
+        println!("Nothing has been changed yet.");
+        return Ok(());
+    }
+    for entry in log {
+        let at = chrono::DateTime::from_timestamp(entry.at, 0)
+            .map(|t| {
+                t.with_timezone(&chrono::Local)
+                    .format("%Y-%m-%d %H:%M")
+                    .to_string()
+            })
+            .unwrap_or_default();
+        let tool = entry
+            .provider
+            .as_deref()
+            .and_then(|p| ProviderId::parse(p).ok())
+            .map(|p| format!(" ({})", p.display_name()))
+            .unwrap_or_default();
+        let what = match (entry.from.as_deref(), entry.account.as_deref()) {
+            (Some(from), Some(to)) => format!("{from} -> {to}"),
+            (None, Some(name)) => name.to_owned(),
+            _ => String::new(),
+        };
+        let by = match entry.by {
+            By::App => "app",
+            By::Cli => "command line",
+        };
+        let result = if entry.worked() {
+            String::new()
+        } else {
+            format!("  [{}]", entry.result)
+        };
+        println!("{at}  {:<14} {what}{tool}  by {by}{result}", entry.verb);
+    }
+    Ok(())
+}
+
+/// The doctor's report; true when no check failed.
+fn print_doctor(engine: &Engine<RealHost>) -> bool {
+    let home = dirs::home_dir().unwrap_or_default();
+    let checks = doctor::run(engine, &|p| signin::find_program(p, &home));
+    let mut group = String::new();
+    for check in &checks {
+        if check.group != group {
+            group.clone_from(&check.group);
+            let title = ProviderId::parse(&group)
+                .map(|p| p.display_name().to_owned())
+                .unwrap_or_else(|_| "Piaz Switch".into());
+            println!("{title}");
+        }
+        let mark = match check.level {
+            Level::Ok => "ok  ",
+            Level::Warn => "warn",
+            Level::Fail => "FAIL",
+        };
+        println!("  {mark}  {}", doctor_line(check));
+    }
+    let (warn, fail) = doctor::issues(&checks);
+    println!();
+    match (warn + fail, fail) {
+        (0, _) => println!("No issues. Everything Piaz Switch checks is in order."),
+        (n, 0) => println!("{n} issue(s). Nothing here stops a switch."),
+        (n, _) => {
+            println!("{n} issue(s). Don't switch accounts until the failed checks are fixed.")
+        }
+    }
+    fail == 0
+}
+
+fn doctor_line(check: &doctor::Check) -> String {
+    use doctor::{check as id, found};
+    let subject = check.subject.as_deref().unwrap_or("");
+    match (check.id, check.finding.as_str()) {
+        (id::FOLDER, found::WRITABLE) => format!("Folder {subject} can be written to"),
+        (id::FOLDER, code) => format!("Folder {subject} can't be written to ({code})"),
+        (id::STATE, found::READ) => format!("Account list read: {subject} account(s)"),
+        (id::STATE, code) => format!("Account list can't be read ({code})"),
+        (id::VAULT_KEY, found::PRESENT) => "Vault key is in the keystore".into(),
+        (id::VAULT_KEY, code) => format!(
+            "Vault key can't be used ({code}); parked logins can't be opened: remove every account, then enroll each again"
+        ),
+        (id::PROGRAM, found::FOUND) => format!("Program found: {subject}"),
+        (id::PROGRAM, _) => "Program not found on this computer".into(),
+        (id::LOGIN, found::SIGNED_IN) => format!("Signed in as `{subject}`"),
+        (id::LOGIN, found::UNMANAGED) => {
+            "Signed in to an account Piaz Switch doesn't manage; enroll it under a name".into()
+        }
+        (id::LOGIN, found::LOGGED_OUT) => "Signed in to nobody".into(),
+        (id::LOGIN, code) => format!("The login in use can't be read ({code})"),
+        (id::PARKED, found::KEPT) => format!("`{subject}`: parked login kept"),
+        (id::PARKED, code @ ("vaultKeyMissing" | "keystore")) => {
+            format!("`{subject}`: parked login can't be opened ({code}); see the vault key above")
+        }
+        (id::PARKED, code) => {
+            format!("`{subject}`: parked login can't be opened ({code}); sign in to it again")
+        }
+        (other, code) => format!("{other}: {code}"),
+    }
+}
+
 fn now_epoch() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -142,7 +290,15 @@ fn main() {
                 sign_in: false,
             } => {
                 let provider = ProviderId::parse(&provider)?;
-                let meta = engine.enroll(provider, &name)?;
+                let enrolled = engine.enroll(provider, &name);
+                record(
+                    &host,
+                    Entry::new(now_epoch(), verb::ENROLL, By::Cli)
+                        .provider(provider)
+                        .account(&name),
+                    &enrolled,
+                );
+                let meta = enrolled?;
                 println!(
                     "Enrolled `{name}` for {} ({}) — now active.",
                     provider.display_name(),
@@ -165,7 +321,15 @@ fn main() {
                 );
                 let dir = signin::run_in_terminal(provider, &home)?;
                 let login = signin::take_login(engine.host(), provider, dir.path())?;
-                let meta = engine.add_signed_in(provider, &name, &login)?;
+                let added = engine.add_signed_in(provider, &name, &login);
+                record(
+                    &host,
+                    Entry::new(now_epoch(), verb::SIGN_IN, By::Cli)
+                        .provider(provider)
+                        .account(&name),
+                    &added,
+                );
+                let meta = added?;
                 println!(
                     "Enrolled `{name}` ({}). Switch to it with: piaz-switch use {name}",
                     meta.label.as_deref().unwrap_or("no email found"),
@@ -199,7 +363,21 @@ fn main() {
                         );
                     }
                 }
-                match engine.switch(&name, provider)? {
+                let tool = owner(&engine, &name, provider);
+                let from = tool.and_then(|p| in_use(&engine, p));
+                let switched = engine.switch(&name, provider);
+                let unchanged = matches!(switched, Ok(SwitchOutcome::AlreadyActive));
+                if let (Some(p), false) = (tool, unchanged) {
+                    record(
+                        &host,
+                        Entry::new(now_epoch(), verb::USE, By::Cli)
+                            .provider(p)
+                            .account(&name)
+                            .from(from),
+                        &switched,
+                    );
+                }
+                match switched? {
                     SwitchOutcome::AlreadyActive => println!("`{name}` is already active."),
                     // `switch` replaces an unmanaged login; only the careful one stops.
                     SwitchOutcome::WouldReplace(_) => unreachable!("switch never stops to ask"),
@@ -229,18 +407,41 @@ fn main() {
                 new_name,
                 provider,
             } => {
-                let meta = engine.rename(&name, parse_provider(provider.as_deref())?, &new_name)?;
+                let provider = parse_provider(provider.as_deref())?;
+                let renamed = engine.rename(&name, provider, &new_name);
+                let mut entry = Entry::new(now_epoch(), verb::RENAME, By::Cli)
+                    .account(&new_name)
+                    .from(Some(&name));
+                if let Ok(meta) = &renamed {
+                    entry = entry.provider(meta.provider);
+                }
+                record(&host, entry, &renamed);
+                let meta = renamed?;
                 println!(
                     "Renamed `{name}` to `{new_name}` ({}).",
                     meta.label.as_deref().unwrap_or("no email found")
                 );
             }
             Command::Remove { name, provider } => {
-                match engine.remove(&name, parse_provider(provider.as_deref())?)? {
+                let provider = parse_provider(provider.as_deref())?;
+                let tool = owner(&engine, &name, provider);
+                let removed = engine.remove(&name, provider);
+                let mut entry = Entry::new(now_epoch(), verb::FORGET, By::Cli).account(&name);
+                if let Some(p) = tool {
+                    entry = entry.provider(p);
+                }
+                record(&host, entry, &removed);
+                match removed? {
                     RemoveOutcome::Removed => println!("Removed `{name}`."),
                     RemoveOutcome::RemovedActive => println!(
                         "Removed `{name}` from Piaz Switch. The tool's live login was left untouched."
                     ),
+                }
+            }
+            Command::Log { count } => print_log(&host, count)?,
+            Command::Doctor => {
+                if !print_doctor(&engine) {
+                    std::process::exit(1);
                 }
             }
         }

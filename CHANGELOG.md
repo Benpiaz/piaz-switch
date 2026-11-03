@@ -1,5 +1,33 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- **Use first** in Settings → Automation: **Most left** (as before) or **Week that
+  resets first**. Each Claude Code account's week resets at its own time, and what
+  it leaves unused is lost then. With the second, the automatic switch, and the
+  account offered once one runs out, go first to the account whose week resets
+  soonest; with automatic switching on, Piaz Switch also moves Claude Code there
+  before the share is reached when it has room and has used no more of its 5 hours,
+  at most once a week per account, never within 5 minutes of a switch and never back
+  to an account you switched away from yourself that week. An account without a
+  weekly limit, such as a Team seat, comes first. The notification says why: "work's
+  week resets at Tue 21:00, before personal's at Sun 18:00".
+- **Activity**, in Settings → Troubleshoot: the last 500 changes to your accounts,
+  newest first, by day: switches by hand and automatic ones (with why), accounts
+  added, signed in again, renamed and forgotten, parked logins renewed, warm-ups, and
+  what stopped any that failed, whether they came from the app or the command line.
+  `piaz-switch log` shows the same. It is kept in `~/.pitstop/activity.jsonl` and
+  holds names and outcome codes only, never a token or an email.
+- **Diagnostics**, in Settings → Troubleshoot: checks Piaz Switch's folder, the
+  account list, the vault key, and for each tool its program, the login in use (and
+  whether a sign-in such as `/login` replaced it outside Piaz Switch), every parked
+  login and each account's last usage read, with a fix beside what the window can
+  mend (**Sign In Again**, **Name It**, **Refresh**). **Copy Report** copies the
+  checks for a bug report, with paths starting at `~` and no email addresses.
+  `piaz-switch doctor` runs the same checks, except the usage reads, and exits with
+  1 when one fails.
+
 ## [0.5.5] - 2026-11-03
 
 ### Fixed

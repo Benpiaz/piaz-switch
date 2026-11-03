@@ -20,6 +20,9 @@ pub struct Settings {
     /// reaches `auto_switch_at` percent.
     pub auto_switch: bool,
     pub auto_switch_at: u8,
+    /// Which account the automatic switch, and the offer once one runs out,
+    /// goes to first; resets soonest also switches before the threshold.
+    pub use_first: crate::duty::UseFirst,
     /// Notify when the account in use runs out and another has room.
     pub notify_run_out: bool,
     /// Claude Code accounts, by name, whose next five-hour period is started
@@ -41,6 +44,7 @@ impl Default for Settings {
             dismissed_tips: Vec::new(),
             auto_switch: false,
             auto_switch_at: 90,
+            use_first: crate::duty::UseFirst::MostLeft,
             notify_run_out: true,
             warm_up: Vec::new(),
             warm_from: "07:00".into(),
@@ -95,6 +99,7 @@ mod tests {
         assert_eq!(settings.dismissed_tips, vec!["codex".to_string()]);
         assert!(!settings.auto_switch);
         assert_eq!(settings.auto_switch_at, 90);
+        assert_eq!(settings.use_first, crate::duty::UseFirst::MostLeft);
         assert!(settings.notify_run_out);
         assert!(settings.warm_up.is_empty());
         assert_eq!(settings.warm_from, "07:00");
@@ -107,6 +112,7 @@ mod tests {
         let settings = Settings {
             auto_switch: true,
             auto_switch_at: 80,
+            use_first: crate::duty::UseFirst::ResetsSoonest,
             notify_run_out: false,
             warm_up: vec!["ben2".into()],
             warm_from: "06:30".into(),

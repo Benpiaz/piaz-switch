@@ -45,3 +45,28 @@ pub enum Error {
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+impl Error {
+    /// A name for what went wrong that stays the same whatever the words:
+    /// the window translates it, and the activity log records it.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Error::NotLoggedIn(_) => "notLoggedIn",
+            Error::DuplicateAccount(..) => "duplicateAccount",
+            Error::AlreadyEnrolled { .. } => "alreadyEnrolled",
+            Error::WrongAccount { .. } => "wrongAccount",
+            Error::UnknownAccount(_) => "unknownAccount",
+            Error::AmbiguousAccount(_) => "ambiguousAccount",
+            Error::InvalidName(_) => "invalidName",
+            Error::VaultKeyMissing => "vaultKeyMissing",
+            Error::VaultBlobMissing(_) => "vaultBlobMissing",
+            Error::VaultCorrupt(_) => "vaultCorrupt",
+            Error::ToolNotFound(_) => "toolNotFound",
+            Error::SignIn(_) => "signIn",
+            Error::EditorStillOpen(_) => "editorStillOpen",
+            Error::Io { .. } => "io",
+            Error::Keystore(_) => "keystore",
+            Error::InvalidData(_) => "invalidData",
+        }
+    }
+}

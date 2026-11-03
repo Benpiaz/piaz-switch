@@ -2,9 +2,11 @@
 //! usage or an error: never a token. Anything that touches files, the
 //! keychain, the network or a lock runs off the UI thread.
 
+use pitstop_core::activity::{self, verb, By, Entry};
+use pitstop_core::doctor::{self, Check, Level};
 use pitstop_core::engine::{RemoveOutcome, SwitchOutcome};
 use pitstop_core::live::Live;
-use pitstop_core::{editor, ProviderId};
+use pitstop_core::{editor, signin, ProviderId};
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_autostart::ManagerExt;
@@ -199,6 +201,33 @@ pub fn switch(
     })
 }
 
+/// [`switch`] asked for by the user, in the window or the tray menu: a
+/// switch made, or one that failed, goes in the log, and the account left
+/// isn't switched back to before the threshold this week.
+pub fn switch_by_hand(
+    app: &AppHandle,
+    pid: ProviderId,
+    name: &str,
+    replace_unmanaged: bool,
+    restart_editor: bool,
+) -> Answer<Switched> {
+    let from = app::in_use_name(pid);
+    let switched = switch(app, pid, name, replace_unmanaged, restart_editor);
+    match &switched {
+        Ok(done) if done.switched => app::switched_by_hand(app, pid, from.as_deref(), &done.name),
+        Err(error) => app::log(
+            &app::host(),
+            Entry::new(app::now(), verb::USE, By::App)
+                .provider(pid)
+                .account(name)
+                .from(from)
+                .result(error.code),
+        ),
+        Ok(_) => {}
+    }
+    switched
+}
+
 #[tauri::command]
 pub async fn use_account(
     app: AppHandle,
@@ -209,7 +238,7 @@ pub async fn use_account(
 ) -> Answer<Switched> {
     let pid = self::provider(&provider)?;
     blocking(move || {
-        switch(
+        switch_by_hand(
             &app,
             pid,
             &name,
@@ -230,6 +259,13 @@ pub async fn name_account(app: AppHandle, provider: String, name: String) -> Ans
             let _op = state.ops.lock();
             app::engine().enroll(pid, &name)
         };
+        app::log(
+            &app::host(),
+            Entry::new(app::now(), verb::ENROLL, By::App)
+                .provider(pid)
+                .account(&name)
+                .outcome(&enrolled),
+        );
         app::refresh(&app);
         enrolled.map_err(|e| UiError::from(&e))?;
         app::read_usage_now(&app);
@@ -252,6 +288,14 @@ pub async fn rename_account(
             let _op = state.ops.lock();
             app::engine().rename(&name, Some(pid), &new_name)
         };
+        app::log(
+            &app::host(),
+            Entry::new(app::now(), verb::RENAME, By::App)
+                .provider(pid)
+                .account(&new_name)
+                .from(Some(&name))
+                .outcome(&renamed),
+        );
         if let Ok(account) = &renamed {
             // The usage read under the old name belongs to the new one, and so
             // do its warm-up setting and record.
@@ -277,6 +321,13 @@ pub async fn forget_account(app: AppHandle, provider: String, name: String) -> A
             let _op = state.ops.lock();
             app::engine().remove(&name, Some(pid))
         };
+        app::log(
+            &app::host(),
+            Entry::new(app::now(), verb::FORGET, By::App)
+                .provider(pid)
+                .account(&name)
+                .outcome(&removed),
+        );
         if removed.is_ok() && pid == ProviderId::ClaudeCode {
             crate::warm::follow_forget(&app::host(), &name);
         }
@@ -408,6 +459,7 @@ pub async fn set_automation(
     app: AppHandle,
     auto_switch: Option<bool>,
     auto_switch_at: Option<u8>,
+    use_first: Option<crate::duty::UseFirst>,
     notify_run_out: Option<bool>,
     warm_from: Option<String>,
     warm_to: Option<String>,
@@ -420,6 +472,9 @@ pub async fn set_automation(
         }
         if let Some(at) = auto_switch_at {
             saved.auto_switch_at = at.clamp(50, 100);
+        }
+        if let Some(order) = use_first {
+            saved.use_first = order;
         }
         if let Some(on) = notify_run_out {
             saved.notify_run_out = on;
@@ -455,4 +510,97 @@ pub async fn set_warm_up(app: AppHandle, name: String, on: bool) -> Answer<()> {
         Ok(())
     })
     .await
+}
+
+/// The last changes made to the accounts, newest first, from the app and
+/// the command line.
+#[tauri::command]
+pub async fn get_activity() -> Answer<Vec<Entry>> {
+    blocking(move || activity::recent(&app::host(), activity::KEEP).map_err(|e| UiError::from(&e)))
+        .await
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Diagnostics {
+    pub checks: Vec<Check>,
+    pub warnings: usize,
+    pub failures: usize,
+    pub checked_at: i64,
+    /// For the copied report: the app's version and the system it runs on.
+    pub version: &'static str,
+    pub system: String,
+}
+
+/// What `piaz-switch doctor` checks, and what the last usage read says of
+/// each account that needs something done.
+#[tauri::command]
+pub async fn run_diagnostics(app: AppHandle) -> Diagnostics {
+    blocking(move || {
+        // Looked for first: on macOS a look starts a login shell, and nothing
+        // waits on it.
+        let home = app::real_home();
+        let programs: Vec<(ProviderId, Option<std::path::PathBuf>)> = ProviderId::ALL
+            .iter()
+            .map(|&p| (p, signin::find_program(p, &home)))
+            .collect();
+        let found = |p: ProviderId| {
+            programs
+                .iter()
+                .find(|(q, _)| *q == p)
+                .and_then(|(_, path)| path.clone())
+        };
+        let mut checks = {
+            // A check reads the login in use and the parked ones: not while
+            // a switch or a renewal changes them.
+            let state = app.state::<AppState>();
+            let _op = state.ops.lock();
+            doctor::run(&app::engine(), &found)
+        };
+        if let Some(snapshot) = app::snapshot(&app) {
+            usage_checks(&snapshot, &mut checks);
+        }
+        let (warnings, failures) = doctor::issues(&checks);
+        Diagnostics {
+            checks,
+            warnings,
+            failures,
+            checked_at: app::now(),
+            version: env!("CARGO_PKG_VERSION"),
+            system: format!("{} {}", std::env::consts::OS, std::env::consts::ARCH),
+        }
+    })
+    .await
+}
+
+/// One check per account whose last usage read needs something done, put
+/// after its tool's other checks.
+fn usage_checks(snapshot: &Snapshot, checks: &mut Vec<Check>) {
+    use crate::model::UsageView;
+    for tool in &snapshot.tools {
+        for account in &tool.accounts {
+            let (level, finding) = match &account.usage {
+                Some(UsageView::Unauthorized) => (Level::Fail, "refused"),
+                Some(UsageView::Expired) if !account.in_use => (Level::Warn, "expired"),
+                Some(UsageView::Failed {
+                    rate_limited: true, ..
+                }) => (Level::Warn, "rateLimited"),
+                Some(UsageView::Failed { offline: true, .. }) => (Level::Warn, "offline"),
+                Some(UsageView::Failed { .. }) => (Level::Warn, "unread"),
+                _ => continue,
+            };
+            let check = Check {
+                group: tool.id.into(),
+                id: "usage",
+                level,
+                subject: Some(account.name.clone()),
+                finding: finding.into(),
+            };
+            let after = checks
+                .iter()
+                .rposition(|c| c.group == tool.id)
+                .map_or(checks.len(), |i| i + 1);
+            checks.insert(after, check);
+        }
+    }
 }

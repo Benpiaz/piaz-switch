@@ -35,7 +35,11 @@ people who use more than one **Claude Code**, **Codex**, **Cursor** or
   a Pro, a plan without a ×N counts once. A limit only some of the accounts have is
   added up over just those.
 - **Switch automatically** to the account with the most room left when the one in
-  use is about to run out, and **warm up** an account's next 5-hour window.
+  use is about to run out, or first to the one whose week resets soonest so no weekly
+  quota goes to waste, and **warm up** an account's next 5-hour window.
+- **See what changed and check what's wrong**: an **Activity** log of every switch,
+  sign-in, renewal and warm-up, and **Diagnostics** that check each tool, the login
+  in use and every parked login, with a report to copy into a bug report.
 - **See what you used and what it would cost** at API prices, from the logs on your
   own computer.
 - **Private by design**: no server, no telemetry, no account of ours. Parked logins
@@ -240,10 +244,14 @@ Start Piaz Switch (from the Start menu on Windows, or `Piaz Switch.exe` from the
 - **Settings**: English or Vietnamese, **Appearance** (System, Light or Dark),
   **Open Piaz Switch at login** (tray only, no window, when you sign in to the
   computer), **Updates** (see [Download](#download)), **Automation**: switch Claude
-  Code to the account with the most room left when a limit of the account in use
-  reaches a chosen share, a notification when the account in use runs out, and
+  Code to another account when a limit of the account in use reaches a chosen share,
+  with **Use first** choosing the account with the most room left or the one whose
+  week resets first (which also switches before the share, to spend that week
+  first), a notification when the account in use runs out, and
   **Warm-up**, which starts a chosen account's next five-hour period as soon as the
-  last one ends with one short Haiku message, optionally only between set hours; and
+  last one ends with one short Haiku message, optionally only between set hours;
+  **Troubleshoot**: **Diagnostics** (what Piaz Switch relies on, checked, with
+  **Copy Report**) and **Activity** (the last 500 changes to your accounts); and
   **About**: the version, what leaves your computer, and the author's links.
 
 Closing the window keeps Piaz Switch in the tray; **Quit** is in the tray menu.
@@ -260,6 +268,8 @@ piaz-switch list --offline     # same, without asking Anthropic / OpenAI for usa
 piaz-switch use work           # switch
 piaz-switch rename work job    # rename, keeping the parked login
 piaz-switch remove job         # forget an account and delete its parked credential
+piaz-switch log                # the last changes, from the app and the command line
+piaz-switch doctor             # check the folder, the vault key, each tool and every parked login
 ```
 
 ### Usage (best-effort)
@@ -403,7 +413,12 @@ còn bao nhiêu hạn mức (5 giờ, tuần, tháng, theo model).
 - **Mức dùng** (Usage): token Claude Code và Codex đã dùng và chi phí ước tính theo
   giá API, theo từng công cụ, từng ngày, đọc từ log ngay trên máy bạn.
 - **Tự động chuyển** Claude Code sang tài khoản còn nhiều hạn mức nhất khi tài khoản
-  đang dùng sắp hết, và **Warm-up** để bắt đầu sẵn khung 5 giờ kế tiếp.
+  đang dùng sắp hết, hoặc ưu tiên tài khoản có tuần reset sớm nhất để không phí quota
+  tuần, và **Warm-up** để bắt đầu sẵn khung 5 giờ kế tiếp.
+- **Hoạt động và Chẩn đoán** (Cài đặt → Khắc phục sự cố): nhật ký mọi lần chuyển,
+  đăng nhập, gia hạn, warm-up; và phần kiểm tra từng công cụ, đăng nhập đang dùng,
+  từng đăng nhập đã cất, kèm báo cáo để sao chép khi báo lỗi. Dòng lệnh có
+  `piaz-switch log` và `piaz-switch doctor`.
 - **Tự cập nhật**: app báo khi có bản mới, bạn bấm là cài.
 - **Riêng tư**: không có máy chủ, không thu thập dữ liệu. Thông tin đăng nhập được mã
   hóa AES-256-GCM ngay trên máy bạn, khóa nằm trong kho khóa của hệ điều hành; mỗi

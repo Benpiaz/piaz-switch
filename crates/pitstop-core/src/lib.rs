@@ -1,4 +1,6 @@
+pub mod activity;
 pub mod cursor_login;
+pub mod doctor;
 pub mod editor;
 pub mod engine;
 pub mod error;

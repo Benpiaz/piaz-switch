@@ -4,6 +4,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use pitstop_core::activity;
 use pitstop_core::signin::{self, Progress, Session};
 use pitstop_core::ProviderId;
 use serde::Serialize;
@@ -230,6 +231,18 @@ fn watch(
         } else {
             engine.add_signed_in(provider, &name, &login).map(|_| ())
         };
+        let what = if again {
+            activity::verb::SIGN_IN_AGAIN
+        } else {
+            activity::verb::SIGN_IN
+        };
+        app::log(
+            &app::host(),
+            activity::Entry::new(app::now(), what, activity::By::App)
+                .provider(provider)
+                .account(&name)
+                .outcome(&parked),
+        );
         parked.map_err(|e| UiError::from(&e))
     });
     match result {

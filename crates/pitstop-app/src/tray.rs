@@ -182,8 +182,8 @@ fn switch(app: &AppHandle, provider: &str, name: &str) {
     };
     let app = app.clone();
     let name = name.to_owned();
-    std::thread::spawn(
-        move || match crate::commands::switch(&app, pid, &name, false, false) {
+    std::thread::spawn(move || {
+        match crate::commands::switch_by_hand(&app, pid, &name, false, false) {
             Ok(asked) if asked.needs_confirmation || asked.needs_restart => {
                 app::show_window(&app);
                 let _ = app.emit(
@@ -206,6 +206,6 @@ fn switch(app: &AppHandle, provider: &str, name: &str) {
                     serde_json::json!({ "name": name, "error": error }),
                 );
             }
-        },
-    );
+        }
+    });
 }

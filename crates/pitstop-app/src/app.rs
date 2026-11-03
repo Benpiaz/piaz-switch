@@ -6,7 +6,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use pitstop_core::engine::AccountUsage;
+use pitstop_core::activity::{self, verb, By, Entry};
+use pitstop_core::engine::{AccountUsage, Renewal};
 use pitstop_core::live::Live;
 use pitstop_core::usage::Http;
 use pitstop_core::{signin, Engine, ProviderId, RealHost};
@@ -43,6 +44,25 @@ struct Automatic {
     tries: HashMap<String, u32>,
     /// Told once that an unmanaged login stops automatic switching.
     told_unmanaged: bool,
+    /// The switches this run made, as logged, newest last: they count with
+    /// the log's for the switch before the threshold, even when the log
+    /// couldn't be written.
+    switches: Vec<Entry>,
+    /// The last renewal outcome logged per account: a refusal or failure
+    /// retried again and again is logged once, not on every try.
+    renewals_logged: HashMap<String, &'static str>,
+}
+
+/// How many of this run's switches [`Automatic::switches`] keeps.
+const SWITCHES_KEPT: usize = 100;
+
+impl Automatic {
+    fn switched(&mut self, entry: Entry) {
+        if self.switches.len() >= SWITCHES_KEPT {
+            self.switches.remove(0);
+        }
+        self.switches.push(entry);
+    }
 }
 
 #[derive(Default)]
@@ -227,8 +247,62 @@ fn renew_parked(app: &AppHandle) {
     let Ok(renewed) = renewed else {
         return;
     };
+    let host = host();
+    for (name, renewal) in &renewed {
+        let result = match renewal {
+            Renewal::Renewed => activity::DONE,
+            Renewal::Refused => "refused",
+            Renewal::Failed(_) => "failed",
+        };
+        let repeated = state.automatic.lock().is_ok_and(|mut auto| {
+            auto.renewals_logged.insert(name.clone(), result) == Some(result)
+                && result != activity::DONE
+        });
+        if !repeated {
+            log(
+                &host,
+                Entry::new(now(), verb::RENEW, By::App)
+                    .provider(ProviderId::ClaudeCode)
+                    .account(name)
+                    .result(result),
+            );
+        }
+    }
     if let Ok(mut inner) = state.inner.lock() {
         inner.renewals.note(&renewed, now());
+    };
+}
+
+/// Add a change to the activity log; one that can't be written stops nothing.
+pub fn log(host: &RealHost, entry: Entry) {
+    let _ = activity::record(host, &entry);
+}
+
+/// The account `provider` is using now: its login's owner, or the record
+/// when the login can't be read. Not the window's last look, which a switch
+/// from the command line may have made out of date.
+pub fn in_use_name(provider: ProviderId) -> Option<String> {
+    match engine().live(provider) {
+        Ok(Live::Account(name)) => Some(name),
+        Ok(_) => None,
+        Err(_) => engine()
+            .state()
+            .ok()
+            .and_then(|s| s.active_name(provider).cloned()),
+    }
+}
+
+/// A switch the user made from `from`: it goes in the log, and `from` is not
+/// switched back to before the threshold this week.
+pub fn switched_by_hand(app: &AppHandle, provider: ProviderId, from: Option<&str>, to: &str) {
+    let entry = Entry::new(now(), verb::USE, By::App)
+        .provider(provider)
+        .account(to)
+        .from(from);
+    log(&host(), entry.clone());
+    let state = app.state::<AppState>();
+    if let Ok(mut auto) = state.automatic.lock() {
+        auto.switched(entry);
     };
 }
 
@@ -340,10 +414,12 @@ fn duties(app: &AppHandle) {
         .find(|t| t.id == ProviderId::ClaudeCode.as_str());
 
     if settings.auto_switch {
-        if let Some(plan) =
-            claude.and_then(|tool| duty::switch_target(tool, settings.auto_switch_at, now()))
-        {
-            auto_switch(app, lang, &plan);
+        let plan = claude.and_then(|tool| {
+            duty::switch_target(tool, settings.auto_switch_at, settings.use_first, now())
+                .or_else(|| early_plan(app, &host, &snapshot, &settings, tool))
+        });
+        if let Some(plan) = plan {
+            auto_switch(app, &host, lang, &plan);
         }
     }
     if settings.notify_run_out {
@@ -370,7 +446,61 @@ fn duties(app: &AppHandle) {
     }
 }
 
-fn auto_switch(app: &AppHandle, lang: Lang, plan: &duty::SwitchPlan) {
+/// A switch before the threshold to the account whose week resets first,
+/// when that order is chosen: only on a recent reading, and not within a few
+/// minutes of any switch, from here or from the command line.
+fn early_plan(
+    app: &AppHandle,
+    host: &RealHost,
+    snapshot: &Snapshot,
+    settings: &settings::Settings,
+    tool: &model::ToolView,
+) -> Option<duty::SwitchPlan> {
+    if settings.use_first != duty::UseFirst::ResetsSoonest {
+        return None;
+    }
+    let at = now();
+    if !snapshot
+        .updated_at
+        .is_some_and(|read| at - read <= duty::KEEP_GOOD_FOR)
+    {
+        return None;
+    }
+    // The log, and this run's switches should the log have missed any.
+    let mut log = activity::recent(host, activity::KEEP).unwrap_or_default();
+    {
+        let state = app.state::<AppState>();
+        let auto = state.automatic.lock().ok()?;
+        let missed: Vec<Entry> = auto
+            .switches
+            .iter()
+            .filter(|s| !log.contains(s))
+            .cloned()
+            .collect();
+        log.extend(missed);
+    }
+    log.sort_by_key(|e| std::cmp::Reverse(e.at));
+    if activity::last_switch_at(&log).is_some_and(|last| at - last < duty::EARLY_QUIET) {
+        return None;
+    }
+    let spent = duty::early_spent(&log, tool, at);
+    duty::early_target(tool, settings.auto_switch_at, &spent, at)
+}
+
+/// Why an automatic switch was made, for the log: `limit|5h|92`, or
+/// `resetsFirst|<to's reset>|<from's reset>`.
+fn switch_detail(plan: &duty::SwitchPlan) -> String {
+    match plan.early {
+        Some(early) => format!(
+            "resetsFirst|{}|{}",
+            early.to_resets.unwrap_or(0),
+            early.from_resets.unwrap_or(0)
+        ),
+        None => format!("limit|{}|{:.0}", plan.limit, plan.percent.floor()),
+    }
+}
+
+fn auto_switch(app: &AppHandle, host: &RealHost, lang: Lang, plan: &duty::SwitchPlan) {
     let key = plan.key(ProviderId::ClaudeCode.as_str());
     let state = app.state::<AppState>();
     {
@@ -384,14 +514,35 @@ fn auto_switch(app: &AppHandle, lang: Lang, plan: &duty::SwitchPlan) {
         *tries += 1;
     }
     let tool = ProviderId::ClaudeCode.display_name();
-    match crate::commands::switch(app, ProviderId::ClaudeCode, &plan.to, false, false) {
+    let entry = Entry::new(now(), verb::AUTO_SWITCH, By::App)
+        .provider(ProviderId::ClaudeCode)
+        .account(&plan.to)
+        .from(Some(&plan.from))
+        .detail(switch_detail(plan));
+    let switched = crate::commands::switch(app, ProviderId::ClaudeCode, &plan.to, false, false);
+    match &switched {
+        Ok(done) if done.switched => log(host, entry.clone()),
+        Err(error) => log(host, entry.clone().result(error.code)),
+        Ok(_) => {}
+    }
+    match switched {
         Ok(done) if done.switched => {
             if let Ok(mut auto) = state.automatic.lock() {
                 auto.sent.insert(key);
                 auto.told_unmanaged = false;
+                // Counted, with the log, by `duty::early_spent`.
+                auto.switched(entry);
             }
             let title = lang.auto_switched(tool, &plan.to);
-            let why = lang.auto_switched_why(&plan.from, plan.percent, &lang.window(&plan.limit));
+            let why = match plan.early {
+                Some(early) => lang.auto_switched_early_why(
+                    &plan.from,
+                    &plan.to,
+                    early.to_resets.map(|at| week_clock(lang, at)).as_deref(),
+                    early.from_resets.map(|at| week_clock(lang, at)).as_deref(),
+                ),
+                None => lang.auto_switched_why(&plan.from, plan.percent, &lang.window(&plan.limit)),
+            };
             notify(app, &title, &why);
             let _ = app.emit(
                 "auto-switched",
@@ -410,6 +561,19 @@ fn auto_switch(app: &AppHandle, lang: Lang, plan: &duty::SwitchPlan) {
         }
         _ => {}
     }
+}
+
+/// A week's reset as the notification says it, local time: `Tue 21:00`,
+/// `21:00 06/11`.
+fn week_clock(lang: Lang, at: i64) -> String {
+    let format = if lang.code() == "vi" {
+        "%H:%M %d/%m"
+    } else {
+        "%a %H:%M"
+    };
+    chrono::DateTime::from_timestamp(at, 0)
+        .map(|t| t.with_timezone(&chrono::Local).format(format).to_string())
+        .unwrap_or_default()
 }
 
 /// Today in this machine's time zone, and minutes since its midnight.
@@ -522,6 +686,16 @@ fn warm_ups(
                 };
                 // A parked login may be renewed even when the warm-up failed.
                 started_any |= outcome.is_ok() || !in_use;
+                log(
+                    host,
+                    Entry::new(now(), verb::WARM_UP, By::App)
+                        .provider(ProviderId::ClaudeCode)
+                        .account(&account.name)
+                        .result(match &outcome {
+                            Ok(()) => activity::DONE,
+                            Err(failure) => failure.code(),
+                        }),
+                );
                 let name = account.name.clone();
                 let warmed = warm::update_if(
                     host,

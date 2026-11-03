@@ -59,6 +59,8 @@ fn main() {
             commands::dismiss_tip,
             commands::set_automation,
             commands::set_warm_up,
+            commands::get_activity,
+            commands::run_diagnostics,
             commands::quit,
             usage_logs::usage_report,
             updates::update_status,
