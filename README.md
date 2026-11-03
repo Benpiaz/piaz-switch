@@ -146,6 +146,7 @@ download page instead. Versions before 0.3.0 have no updater, so get 0.3.0 once 
 | Claude Code (macOS) | Keychain item `Claude Code-credentials` + `oauthAccount` in `~/.claude.json` | same |
 | Codex CLI (all OSes) | `~/.codex/auth.json` | a running Codex keeps the old account until restarted |
 | Cursor | the `cursorAuth/*` rows of `<app data>/Cursor/User/globalStorage/state.vscdb` | Cursor reads them only when it starts: Piaz Switch asks, quits Cursor, switches and opens it again |
+| DeepSeek | the `deepseek` row of the `credential` table in `~/.local/share/opencode/opencode.db`, the key OpenCode uses | sessions that start afterwards use the new key |
 | Antigravity | the `antigravityUnifiedStateSync.oauthToken` / `userStatus` rows of `<app data>/Antigravity IDE/User/globalStorage/state.vscdb` (`<app data>/Antigravity/…` for the editor before 2.0) | same as Cursor |
 
 `<app data>` is `%APPDATA%` on Windows and `~/Library/Application Support` on macOS.
@@ -269,6 +270,10 @@ Claude Code's from Anthropic's usage endpoint (the one Claude Code's `/usage` us
 and Codex's from ChatGPT's (`/backend-api/wham/usage`), with the live token of the
 account in use or a parked account's vault copy. The app refreshes it on start, on
 **Refresh**, after a switch, and every 5 minutes.
+
+Claude's usage endpoint often turns reads away (reports say it allows only a few requests per access token). In **Settings**, turn on **Claude Code live limits** to add a status line to Claude Code's `settings.json` that runs `pitstop-app --statusline`. This saves the 5-hour and weekly limits Claude Code reports with every reply (`rate_limits`, Claude Code 2.1.80 or later, Pro, Max and Ultra plans). When the endpoint turns a read away, it shows those figures for the account in use for up to 15 minutes. Per-model limits still come from the endpoint. A status line of your own is never replaced. To turn this off, remove the `statusLine` entry from `settings.json`.
+
+**DeepSeek.** A key has no owner, so an account is shown by the last characters of its key. Sign in with OpenCode (`opencode auth login`), then name that key in Piaz Switch; repeat for each key. DeepSeek bills a prepaid balance, so the card shows the money left (`GET https://api.deepseek.com/user/balance`, which spends nothing) instead of limits; an empty balance counts as a used-up limit, so automatic switching moves to a key with money. OpenCode reads its key when a session starts: running sessions keep the old one.
 
 Cursor's comes from the endpoint Cursor's own usage panel reads
 (`DashboardService/GetCurrentPeriodUsage`): the share of the plan used this period,
