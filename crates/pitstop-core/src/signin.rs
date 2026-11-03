@@ -137,6 +137,11 @@ pub fn find_in(name: &str, dirs: &[PathBuf]) -> Option<PathBuf> {
 pub fn find_program(provider: ProviderId, home: &Path) -> Option<PathBuf> {
     match (provider, editor::app(provider)) {
         (_, Some(app)) => app.find(home).map(|build| build.path),
+        // OpenCode is there once it has made its database.
+        (ProviderId::DeepSeek, None) => {
+            let database = home.join(".local/share/opencode/opencode.db");
+            database.is_file().then_some(database)
+        }
         (_, None) => command_in(provider, &search_path(home), home),
     }
 }
