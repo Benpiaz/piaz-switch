@@ -902,17 +902,40 @@
     width: 14px;
     height: 14px;
   }
+  /* A limit is a short block: its name and figure on one line, the bar under
+     them, the timing last. Scopes (Gemini, Claude & GPT) sit side by side
+     while there is room. */
   .meters {
     grid-column: 2 / -1;
     display: grid;
-    grid-template-columns: 78px minmax(64px, 1fr) 42px 214px;
-    align-items: center;
-    column-gap: 12px;
-    row-gap: 10px;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 18px 40px;
     margin-top: 14px;
     font-size: 13px;
     line-height: 20px;
     font-variant-numeric: tabular-nums;
+  }
+  .scope {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-width: 0;
+  }
+  .meter-scope {
+    color: var(--ink-3);
+    font-size: 12px;
+    font-weight: var(--w-semibold);
+    line-height: 16px;
+  }
+  .limit {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: baseline;
+    gap: 6px 12px;
+  }
+  .limit > .bar,
+  .limit > .meter-meta {
+    grid-column: 1 / -1;
   }
   .meter-label {
     min-width: 0;
@@ -921,12 +944,30 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  .meter-figure {
+    font-size: 15px;
+    font-weight: var(--w-semibold);
+    letter-spacing: -0.01em;
+    color: var(--ink);
+  }
+  .meter-figure .unit {
+    margin-left: 1px;
+    font-size: 11px;
+    font-weight: var(--w-medium);
+    color: var(--ink-3);
+  }
+  .limit.balance .meter-figure {
+    font-size: 20px;
+    line-height: 24px;
+  }
+  .limit.balance.out .meter-figure {
+    color: var(--bad-ink);
+  }
   .bar {
     position: relative;
-    height: 8px;
+    height: 6px;
     border-radius: var(--r-pill);
-    background: linear-gradient(90deg, transparent calc(25% - 0.5px), var(--track-notch) calc(25% - 0.5px), var(--track-notch) calc(25% + 0.5px), transparent calc(25% + 0.5px)), linear-gradient(90deg, transparent calc(50% - 0.5px), var(--track-notch) calc(50% - 0.5px), var(--track-notch) calc(50% + 0.5px), transparent calc(50% + 0.5px)), linear-gradient(90deg, transparent calc(75% - 0.5px), var(--track-notch) calc(75% - 0.5px), var(--track-notch) calc(75% + 0.5px), transparent calc(75% + 0.5px)), var(--track);
-    box-shadow: var(--track-inset);
+    background: var(--track);
   }
   .bar-fill {
     --meter: var(--ok);
@@ -943,7 +984,7 @@
     --meter: var(--bad);
   }
   .meters .bar-fill:not(.none) {
-    min-width: 8px;
+    min-width: 6px;
   }
   .meters .bar-fill.none {
     visibility: hidden;
@@ -951,70 +992,58 @@
   .pace-over {
     position: absolute;
     inset: 0 0 0 auto;
-    background: repeating-linear-gradient(-45deg, var(--bad) 0 3px, transparent 3px 6px);
-  }
-  @supports (color: color-mix(in oklab, red, red)) {
-    .bar-fill {
-      background: linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0) 60%), linear-gradient(90deg, color-mix(in oklab, var(--meter) 62%, transparent), var(--meter));
-      box-shadow: 0 0 10px -1px color-mix(in oklab, var(--meter) 55%, transparent), inset 0 0 0 var(--hair) color-mix(in oklab, var(--meter) 70%, transparent);
-    }
-    .pace-over {
-      background: repeating-linear-gradient( -45deg, color-mix(in oklab, var(--bad) 85%, transparent) 0 3px, color-mix(in oklab, var(--bad) 45%, transparent) 3px 6px );
-    }
+    background: var(--bad);
   }
   .pace-mark {
     position: absolute;
-    top: -4px;
-    bottom: -4px;
-    width: 3px;
-    margin-left: -1.5px;
-    border-radius: var(--r-pill);
+    top: -3px;
+    bottom: -3px;
+    width: 2px;
+    margin-left: -1px;
+    border-radius: 1px;
     background: var(--pace-mark);
-    box-shadow: 0 0 0 1.5px var(--surface-card), 0 1px 3px rgba(0, 0, 0, 0.25);
   }
   .pace-mark.over {
     background: var(--bad);
   }
-  .meter-figure {
-    text-align: right;
-    font-size: 14px;
-    font-weight: var(--w-semibold);
-    letter-spacing: -0.01em;
-    color: var(--ink);
-  }
-  .meter-figure .unit {
-    margin-left: 1px;
-    font-size: 11px;
-    font-weight: var(--w-medium);
-    color: var(--ink-3);
-  }
   .meter-meta {
     display: flex;
-    align-items: center;
-    gap: 8px;
+    flex-wrap: wrap;
+    gap: 2px 12px;
     min-width: 0;
-    color: var(--ink-2);
-    overflow: hidden;
-    white-space: nowrap;
-  }
-  .meter-resets {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    color: var(--ink-3);
+    font-size: 12px;
+    line-height: 16px;
   }
   .meter-pace {
-    flex: none;
-    padding: 0 8px;
-    border-radius: var(--r-pill);
-    background: var(--ok-tint);
     color: var(--ok-ink);
+    font-weight: var(--w-medium);
+  }
+  .meter-pace.over,
+  .limit.out .meter-note {
+    color: var(--bad-ink);
+  }
+  /* DeepSeek's price period, beside its name. */
+  .peak {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: 4px;
+    color: var(--ink-3);
     font-size: 12px;
     font-weight: var(--w-medium);
-    line-height: 20px;
   }
-  .meter-pace.over {
-    background: var(--bad-tint);
-    color: var(--bad-ink);
+  .peak-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: var(--r-pill);
+    background: var(--ok);
+  }
+  .peak.on {
+    color: var(--warn-ink);
+  }
+  .peak.on .peak-dot {
+    background: var(--warn);
   }
   .notes {
     grid-column: 2 / -1;
@@ -1063,16 +1092,6 @@
     margin-left: auto;
     color: var(--ink-2);
     white-space: nowrap;
-  }
-  @media (max-width: 800px) {
-    .meters {
-      grid-template-columns: 64px minmax(48px, 1fr) 42px;
-      row-gap: 4px;
-    }
-    .meter-meta {
-      grid-column: 2 / -1;
-      margin-bottom: 4px;
-    }
   }
   .callout {
     display: grid;
@@ -1413,6 +1432,10 @@
     appearance: none;
     -webkit-appearance: none;
     transition: background-color var(--dur-base) var(--ease-out);
+  }
+  .select select option {
+    background-color: var(--surface-card);
+    color: var(--ink);
   }
   .select select:hover {
     background: var(--fill-soft-hover);

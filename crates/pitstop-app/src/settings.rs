@@ -22,6 +22,9 @@ pub struct Settings {
     pub auto_switch_at: u8,
     /// Notify when the account in use runs out and another has room.
     pub notify_run_out: bool,
+    /// A DeepSeek key with less than this many whole units of its currency
+    /// left counts as used up, so switching moves on to another key.
+    pub deepseek_min_balance: u32,
     /// Claude Code accounts, by name, whose next five-hour period is started
     /// as soon as the last one ends.
     pub warm_up: Vec<String>,
@@ -42,6 +45,7 @@ impl Default for Settings {
             auto_switch: false,
             auto_switch_at: 90,
             notify_run_out: true,
+            deepseek_min_balance: 2,
             warm_up: Vec::new(),
             warm_from: "07:00".into(),
             warm_to: "23:00".into(),

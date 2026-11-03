@@ -1,5 +1,6 @@
 //! Enroll / switch / remove flows on top of Host + Provider + Vault + State.
 
+use crate::claude_live;
 use crate::error::{Error, Result};
 use crate::host::Host;
 use crate::live::{self, Live};
@@ -383,12 +384,18 @@ impl<H: Host> Engine<H> {
         // Each tool's live login and the account it belongs to. A login that
         // cannot be read, or that nobody enrolled owns, is read for nobody.
         let mut live_logins: Vec<(ProviderId, String, Vec<u8>)> = Vec::new();
+        // What Claude Code's status line saved for the Claude login in use.
+        let mut claude_status_line: Option<(String, usage::Usage)> = None;
         for pid in ProviderId::ALL {
             if !state.accounts.iter().any(|a| a.provider == pid) {
                 continue;
             }
             if let Ok(Some(current)) = provider_for(pid).read_active(&self.host) {
                 if let Some(owner) = live::owner(&state, pid, &current.details) {
+                    if pid == ProviderId::ClaudeCode {
+                        claude_status_line = claude_live::load(&self.host, &current.details, now)
+                            .map(|u| (owner.clone(), u));
+                    }
                     live_logins.push((pid, owner, current.blob));
                 }
             }
@@ -413,7 +420,7 @@ impl<H: Host> Engine<H> {
             })
             .collect();
 
-        let read: Vec<AccountUsage> = std::thread::scope(|scope| {
+        let mut read: Vec<AccountUsage> = std::thread::scope(|scope| {
             let handles: Vec<_> = requests
                 .into_iter()
                 .map(|(meta, request)| {
@@ -435,6 +442,18 @@ impl<H: Host> Engine<H> {
                 })
                 .collect()
         });
+        // A read the service turned away, or an expired token: the limits the
+        // status line saved for this very login are better than nothing.
+        if let Some((owner, saved)) = claude_status_line {
+            let turned_away = read.iter_mut().find(|u| {
+                u.provider == ProviderId::ClaudeCode
+                    && u.name == owner
+                    && !matches!(u.report, UsageReport::Ok(_))
+            });
+            if let Some(entry) = turned_away {
+                entry.report = UsageReport::Ok(saved);
+            }
+        }
         Ok(read)
     }
 
@@ -483,6 +502,8 @@ enum Request {
         account_id: String,
     },
     Cursor(String),
+    /// DeepSeek's balance for an API key.
+    DeepSeek(String),
     /// Known without asking anyone.
     Known(UsageReport),
 }
@@ -518,6 +539,9 @@ impl Request {
                 Some((token, _)) => Ok(Request::Cursor(token)),
                 None => Err(missing()),
             },
+            ProviderId::DeepSeek => crate::provider::deepseek::api_key(blob)
+                .map(Request::DeepSeek)
+                .ok_or_else(missing),
             ProviderId::Antigravity => Ok(Request::Known(
                 crate::provider::antigravity::quota(blob)
                     .map(UsageReport::Ok)
@@ -538,6 +562,7 @@ impl Request {
                 account_id,
             } => usage::codex_report(api.codex(&access_token, &account_id)),
             Request::Cursor(token) => usage::cursor_report(api.cursor(&token)),
+            Request::DeepSeek(key) => usage::deepseek_report(api.deepseek(&key)),
             Request::Known(report) => report,
         }
     }
@@ -1264,6 +1289,16 @@ mod tests {
     }
 
     impl UsageApi for FakeApi {
+        fn deepseek(&self, key: &str) -> std::result::Result<serde_json::Value, usage::FetchError> {
+            match key {
+                "sk-has-money" => Ok(serde_json::json!({"is_available": true, "balance_infos": [
+                    {"currency": "USD", "total_balance": "12.50", "granted_balance": "0.00", "topped_up_balance": "12.50"}]})),
+                "sk-empty" => Ok(serde_json::json!({"is_available": false, "balance_infos": [
+                    {"currency": "USD", "total_balance": "0.00"}]})),
+                _ => Err(usage::FetchError::Unauthorized),
+            }
+        }
+
         fn claude(&self, token: &str) -> std::result::Result<serde_json::Value, usage::FetchError> {
             self.seen.lock().unwrap().push(token.to_owned());
             match token {
@@ -1381,6 +1416,47 @@ mod tests {
         let all = engine.usage(&FakeApi::new()).unwrap();
         assert_eq!(five_hour(report_for(&all, "personal")), 20.0);
         assert_eq!(five_hour(report_for(&all, "work")), 10.0);
+    }
+
+    #[test]
+    fn a_refused_read_shows_the_limits_the_status_line_saved_for_the_login_in_use() {
+        let engine = Engine::new(host_logged_in("SECRET-TOKEN-REFUSED", "a@x.com"));
+        engine.enroll(ProviderId::ClaudeCode, "work").unwrap();
+        let api = FakeApi::new();
+        let all = engine.usage(&api).unwrap();
+        assert_eq!(report_for(&all, "work"), &UsageReport::Unauthorized);
+
+        let input =
+            r#"{"rate_limits":{"five_hour":{"used_percentage":33,"resets_at":4102444800}}}"#;
+        claude_live::save(engine.host(), input, now_epoch() as i64).unwrap();
+        let all = engine.usage(&api).unwrap();
+        assert_eq!(five_hour(report_for(&all, "work")), 33.0);
+    }
+
+    #[test]
+    fn deepseek_keys_switch_and_report_their_balance() {
+        let engine = Engine::new(FakeHost::new());
+        engine
+            .host()
+            .put_deepseek(r#"{"type":3,"key":"sk-has-money"}"#);
+        engine.enroll(ProviderId::DeepSeek, "main").unwrap();
+        engine.host().put_deepseek(r#"{"type":3,"key":"sk-empty"}"#);
+        engine.enroll(ProviderId::DeepSeek, "spare").unwrap();
+
+        let all = engine.usage(&FakeApi::new()).unwrap();
+        let UsageReport::Ok(main) = report_for(&all, "main") else {
+            panic!("main is read");
+        };
+        let balance = main.balance.as_ref().unwrap();
+        assert_eq!((balance.amount, balance.currency.as_str()), (12.5, "USD"));
+        assert_eq!(main.windows[0].percent, 0.0);
+        let UsageReport::Ok(spare) = report_for(&all, "spare") else {
+            panic!("spare is read");
+        };
+        assert_eq!(spare.windows[0].percent, 100.0);
+
+        engine.switch("main", Some(ProviderId::DeepSeek)).unwrap();
+        assert!(engine.host().deepseek().unwrap().contains("sk-has-money"));
     }
 
     // ---- editors

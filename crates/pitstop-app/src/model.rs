@@ -33,6 +33,8 @@ pub struct Snapshot {
     /// The theme chosen in Settings; none follows the system.
     pub theme_choice: Option<String>,
     pub autostart: bool,
+    /// Claude Code's status line is this app, which brings its own limits.
+    pub status_line: bool,
     pub dismissed_tips: Vec<String>,
     pub version: &'static str,
     /// Automatic switch, run-out notifications and warm-ups, for Settings.
@@ -45,6 +47,9 @@ pub struct Automation {
     pub auto_switch: bool,
     pub auto_switch_at: u8,
     pub notify_run_out: bool,
+    /// A DeepSeek key with less than this left (whole units of its currency)
+    /// counts as used up.
+    pub deepseek_min_balance: u32,
     pub warm_from: String,
     pub warm_to: String,
     /// One per Claude Code account.
@@ -115,6 +120,9 @@ pub struct AccountView {
 pub enum UsageView {
     Ok {
         windows: Vec<WindowView>,
+        /// Money left, for an account that has one.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        balance: Option<BalanceView>,
     },
     /// The access token has lapsed; switching to the account renews it.
     Expired,
@@ -128,6 +136,12 @@ pub enum UsageView {
         /// No answer came back: offline, or a link too slow to finish the read.
         offline: bool,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct BalanceView {
+    pub amount: f64,
+    pub currency: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -224,6 +238,7 @@ pub struct Input<'a> {
     pub settings: &'a Settings,
     pub language: Lang,
     pub autostart: bool,
+    pub status_line: bool,
     /// Warm-up standings from the last round of duties.
     pub warm: &'a [WarmState],
 }
@@ -241,12 +256,14 @@ pub fn build<H: Host>(engine: &Engine<H>, input: &Input) -> Snapshot {
         language_choice: input.settings.language.clone(),
         theme_choice: input.settings.theme.clone(),
         autostart: input.autostart,
+        status_line: input.status_line,
         dismissed_tips: input.settings.dismissed_tips.clone(),
         version: env!("CARGO_PKG_VERSION"),
         automation: Automation {
             auto_switch: input.settings.auto_switch,
             auto_switch_at: input.settings.auto_switch_at,
             notify_run_out: input.settings.notify_run_out,
+            deepseek_min_balance: input.settings.deepseek_min_balance,
             warm_from: input.settings.warm_from.clone(),
             warm_to: input.settings.warm_to.clone(),
             warm_up: Vec::new(),
@@ -331,9 +348,26 @@ pub fn build<H: Host>(engine: &Engine<H>, input: &Input) -> Snapshot {
         .iter_mut()
         .flat_map(|t| t.accounts.iter_mut())
     {
-        if let Some(UsageView::Ok { windows }) = &mut account.usage {
+        if let Some(UsageView::Ok { windows, .. }) = &mut account.usage {
             for w in windows.iter_mut() {
                 w.percent = crate::duty::used_now(w, input.now);
+            }
+        }
+    }
+    for account in snapshot
+        .tools
+        .iter_mut()
+        .filter(|t| t.id == ProviderId::DeepSeek.as_str())
+        .flat_map(|t| t.accounts.iter_mut())
+    {
+        if let Some(UsageView::Ok { windows, balance }) = &mut account.usage {
+            let below = balance
+                .as_ref()
+                .is_some_and(|b| b.amount < f64::from(input.settings.deepseek_min_balance));
+            if below {
+                for w in windows.iter_mut() {
+                    w.percent = 100.0;
+                }
             }
         }
     }
@@ -362,6 +396,10 @@ impl From<&UsageReport> for UsageView {
     fn from(report: &UsageReport) -> Self {
         match report {
             UsageReport::Ok(usage) => UsageView::Ok {
+                balance: usage.balance.as_ref().map(|b| BalanceView {
+                    amount: b.amount,
+                    currency: b.currency.clone(),
+                }),
                 windows: usage
                     .windows
                     .iter()
@@ -388,7 +426,7 @@ impl From<&UsageReport> for UsageView {
 
 fn windows_of(account: &AccountView) -> Option<&[WindowView]> {
     match &account.usage {
-        Some(UsageView::Ok { windows }) => Some(windows),
+        Some(UsageView::Ok { windows, .. }) => Some(windows),
         _ => None,
     }
 }
@@ -547,7 +585,7 @@ pub fn menu(snapshot: &Snapshot, lang: Lang, clock: &dyn Fn(i64) -> String) -> V
 /// out), or why there are none to show.
 fn account_line(account: &AccountView, lang: Lang, now: i64) -> Option<String> {
     match account.usage.as_ref()? {
-        UsageView::Ok { windows } => {
+        UsageView::Ok { windows, .. } => {
             let parts: Vec<String> = windows
                 .iter()
                 .filter(|w| !w.label.starts_with("week "))
@@ -640,6 +678,34 @@ mod tests {
     }
 
     /// `work` (a@x.com) and `personal` (b@x.com) enrolled, `work` in use.
+    #[test]
+    fn a_deepseek_key_below_the_least_balance_counts_as_used_up() {
+        let engine = Engine::new(FakeHost::new());
+        engine.host().put_deepseek(r#"{"type":3,"key":"sk-a"}"#);
+        engine.enroll(ProviderId::DeepSeek, "main").unwrap();
+        let read_with = |amount: f64| AccountUsage {
+            provider: ProviderId::DeepSeek,
+            name: "main".into(),
+            report: UsageReport::Ok(Usage {
+                windows: vec![window("balance", 0.0)],
+                balance: Some(pitstop_core::usage::Balance {
+                    amount,
+                    currency: "USD".into(),
+                }),
+                plan: None,
+            }),
+        };
+        let percent = |amount: f64| {
+            let snapshot = snapshot_of(&engine, &[read_with(amount)]);
+            let tool = snapshot.tools.iter().find(|t| t.id == "deepseek").unwrap();
+            match &tool.accounts[0].usage {
+                Some(UsageView::Ok { windows, .. }) => windows[0].percent,
+                other => panic!("not read: {other:?}"),
+            }
+        };
+        assert_eq!((percent(1.5), percent(2.0)), (100.0, 0.0));
+    }
+
     fn work_and_personal() -> Engine<FakeHost> {
         let engine = Engine::new(FakeHost::new());
         sign_in_as(engine.host(), TOKEN_A, "a@x.com");
@@ -675,6 +741,7 @@ mod tests {
         UsageReport::Ok(Usage {
             windows,
             plan: None,
+            ..Usage::default()
         })
     }
 
@@ -692,6 +759,7 @@ mod tests {
                 settings: &settings,
                 language: Lang::En,
                 autostart: false,
+                status_line: false,
                 warm: &[],
             },
         )
@@ -751,6 +819,7 @@ mod tests {
         let read = UsageReport::Ok(Usage {
             windows: vec![window("5h", 42.0)],
             plan: Some("Max 5x".into()),
+            ..Usage::default()
         });
         let snapshot = snapshot_of(&engine, &[usage_of("work", read)]);
         let accounts = &claude(&snapshot).accounts;
@@ -775,6 +844,7 @@ mod tests {
         assert_eq!(
             work.usage,
             Some(UsageView::Ok {
+                balance: None,
                 windows: vec![WindowView {
                     label: "5h".into(),
                     percent: 42.0,
@@ -1024,7 +1094,7 @@ mod tests {
             .find(|a| a.name == "work")
             .unwrap();
         match &work.usage {
-            Some(UsageView::Ok { windows }) => assert_eq!(windows[0].percent, 0.0),
+            Some(UsageView::Ok { windows, .. }) => assert_eq!(windows[0].percent, 0.0),
             other => panic!("{other:?}"),
         }
         assert!(snapshot.suggestions.is_empty());

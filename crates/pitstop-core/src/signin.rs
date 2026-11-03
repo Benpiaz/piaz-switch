@@ -43,6 +43,7 @@ pub fn program_name(provider: ProviderId) -> &'static str {
         ProviderId::Codex => "codex",
         ProviderId::Cursor => "Cursor",
         ProviderId::Antigravity => "Antigravity",
+        ProviderId::DeepSeek => "OpenCode",
     }
 }
 
@@ -134,9 +135,9 @@ pub fn find_in(name: &str, dirs: &[PathBuf]) -> Option<PathBuf> {
 /// Antigravity, only its editor). `home` is the real home directory, where
 /// installers put the tools.
 pub fn find_program(provider: ProviderId, home: &Path) -> Option<PathBuf> {
-    match editor::app(provider) {
-        Some(app) => app.find(home).map(|build| build.path),
-        None => command_in(provider, &search_path(home), home),
+    match (provider, editor::app(provider)) {
+        (_, Some(app)) => app.find(home).map(|build| build.path),
+        (_, None) => command_in(provider, &search_path(home), home),
     }
 }
 
@@ -159,7 +160,7 @@ fn carried(provider: ProviderId, home: &Path) -> Option<PathBuf> {
     let programs = match provider {
         ProviderId::ClaudeCode => claude_carried(&claude_app_folders(home), home),
         ProviderId::Codex => codex_app_programs(home),
-        ProviderId::Cursor | ProviderId::Antigravity => return None,
+        ProviderId::Cursor | ProviderId::Antigravity | ProviderId::DeepSeek => return None,
     };
     newest_runnable(programs)
 }
@@ -377,7 +378,7 @@ pub fn command(provider: ProviderId, program: &Path, dir: &Path, search: &[PathB
                 .current_dir(dir);
         }
         // Editors don't sign in through a command: see `Session::start`.
-        ProviderId::Cursor | ProviderId::Antigravity => {}
+        ProviderId::Cursor | ProviderId::Antigravity | ProviderId::DeepSeek => {}
     }
     if let Ok(path) = std::env::join_paths(search) {
         cmd.env("PATH", path);
@@ -407,10 +408,12 @@ pub fn progress(provider: ProviderId, said: &str, since_code: &str) -> Progress 
             wants_code: said.contains("Paste code"),
             refused_code: plain(since_code).contains("Invalid code"),
         },
-        ProviderId::Codex | ProviderId::Cursor | ProviderId::Antigravity => Progress {
-            url,
-            ..Progress::default()
-        },
+        ProviderId::Codex | ProviderId::Cursor | ProviderId::Antigravity | ProviderId::DeepSeek => {
+            Progress {
+                url,
+                ..Progress::default()
+            }
+        }
     }
 }
 
@@ -619,6 +622,11 @@ impl Session {
             ProviderId::Cursor => Self::in_browser(provider),
             ProviderId::Antigravity => Self::in_editor(provider, home),
             ProviderId::ClaudeCode | ProviderId::Codex => Self::by_command(provider, home),
+            // They sign in on their own; the login they leave is then saved.
+            ProviderId::DeepSeek => Err(Error::SignIn(format!(
+                "Sign in with {} itself, then save that login here.",
+                program_name(provider)
+            ))),
         }
     }
 

@@ -1,3 +1,4 @@
+pub mod claude_live;
 pub mod cursor_login;
 pub mod editor;
 pub mod engine;
@@ -5,6 +6,7 @@ pub mod error;
 pub mod host;
 pub mod ledger;
 pub mod live;
+pub mod opencode_db;
 pub(crate) mod pb;
 pub mod pricing;
 pub mod provider;

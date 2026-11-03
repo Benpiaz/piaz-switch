@@ -2,6 +2,7 @@
 //! usage or an error: never a token. Anything that touches files, the
 //! keychain, the network or a lock runs off the UI thread.
 
+use pitstop_core::claude_live;
 use pitstop_core::engine::{RemoveOutcome, SwitchOutcome};
 use pitstop_core::live::Live;
 use pitstop_core::{editor, ProviderId};
@@ -381,6 +382,34 @@ pub async fn set_autostart(app: AppHandle, on: bool) -> Answer<()> {
     .await
 }
 
+/// Make this app Claude Code's status line, so its own 5-hour and weekly
+/// limits reach Piaz Switch without a request. A status line of the user's own
+/// is left alone.
+#[tauri::command]
+pub async fn enable_status_line(app: AppHandle) -> Answer<()> {
+    blocking(move || {
+        let host = app::host();
+        let program =
+            std::env::current_exe().map_err(|e| UiError::new("statusLine", e.to_string()))?;
+        let command = format!(
+            "\"{}\" {}",
+            program.display(),
+            claude_live::STATUS_LINE_FLAG
+        );
+        claude_live::install_status_line(&host, &command).map_err(|e| UiError::from(&e))?;
+        app::refresh(&app);
+        if claude_live::status_line_installed(&host) {
+            Ok(())
+        } else {
+            Err(UiError::new(
+                "statusLineTaken",
+                "Claude Code already has a status line of its own",
+            ))
+        }
+    })
+    .await
+}
+
 #[tauri::command]
 pub async fn dismiss_tip(app: AppHandle, provider: String) -> Answer<()> {
     blocking(move || {
@@ -409,6 +438,7 @@ pub async fn set_automation(
     auto_switch: Option<bool>,
     auto_switch_at: Option<u8>,
     notify_run_out: Option<bool>,
+    deepseek_min_balance: Option<u32>,
     warm_from: Option<String>,
     warm_to: Option<String>,
 ) -> Answer<()> {
@@ -423,6 +453,9 @@ pub async fn set_automation(
         }
         if let Some(on) = notify_run_out {
             saved.notify_run_out = on;
+        }
+        if let Some(least) = deepseek_min_balance {
+            saved.deepseek_min_balance = least.min(100_000);
         }
         let clock = |c: &String| crate::duty::is_clock(c);
         if let Some(from) = warm_from.filter(clock) {

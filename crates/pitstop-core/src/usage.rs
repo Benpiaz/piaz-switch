@@ -5,8 +5,9 @@
 //! - Cursor: `POST https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage`,
 //!   as the editor's own usage panel does, then `…/GetPlanInfo` for the plan
 //!   as its site names it;
-//! - Antigravity: not asked at all. The quota is the one Antigravity itself
+//! - Antigravity (the editor): not asked at all. The quota is the one Antigravity itself
 //!   last read and kept with the login (see `provider::antigravity::quota`).
+//! - DeepSeek: `GET https://api.deepseek.com/user/balance`, the prepaid balance.
 //!
 //! Pitstop never refreshes a token to read usage. Refreshing rotates the
 //! refresh token, and the live login is the tool's to renew — two holders
@@ -21,6 +22,7 @@ pub const USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
 pub const CODEX_USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
 pub const CURSOR_USAGE_URL: &str =
     "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage";
+pub const DEEPSEEK_BALANCE_URL: &str = "https://api.deepseek.com/user/balance";
 pub const CURSOR_PLAN_URL: &str = "https://api2.cursor.sh/aiserver.v1.DashboardService/GetPlanInfo";
 
 /// One rate-limit window, e.g. the five-hour session or the weekly limit.
@@ -41,9 +43,19 @@ pub struct Window {
     pub idle: bool,
 }
 
+/// Money left on a prepaid account (DeepSeek), where there is no period.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Balance {
+    pub amount: f64,
+    /// `USD`, `CNY`…
+    pub currency: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Usage {
     pub windows: Vec<Window>,
+    /// What is left to spend; its absence is the usual case.
+    pub balance: Option<Balance>,
     /// The plan as the service names it now, where the answer says (Cursor):
     /// fresher than the one recorded when the login was parked.
     pub plan: Option<String>,
@@ -88,6 +100,8 @@ pub trait UsageApi: Sync {
     /// Cursor's answer for its access token: this billing period's use,
     /// with the plan's `planInfo` beside it when that could be read.
     fn cursor(&self, access_token: &str) -> Result<Value, FetchError>;
+    /// DeepSeek's balance for an API key: a plain GET, no model request.
+    fn deepseek(&self, api_key: &str) -> Result<Value, FetchError>;
 }
 
 /// Anthropic and OpenAI over the network.
@@ -188,6 +202,16 @@ impl UsageApi for Http {
         }
         Ok(body)
     }
+
+    fn deepseek(&self, api_key: &str) -> Result<Value, FetchError> {
+        let response = call_twice(|| {
+            self.agent
+                .get(DEEPSEEK_BALANCE_URL)
+                .header("Authorization", format!("Bearer {api_key}"))
+                .call()
+        });
+        answer(response, "DeepSeek")
+    }
 }
 
 /// The access token inside a claude-code vault blob. Deliberately not `Debug`.
@@ -272,6 +296,7 @@ pub fn parse_codex(body: &Value) -> Usage {
         .filter_map(|which| codex_window(limits.get(which)?, which))
         .collect();
     Usage {
+        balance: None,
         windows,
         plan: None,
     }
@@ -335,8 +360,8 @@ fn moment(value: &Value) -> Option<i64> {
     value.as_str().and_then(parse_rfc3339)
 }
 
-const FIVE_HOURS: i64 = 18_000;
-const WEEK: i64 = 604_800;
+pub(crate) const FIVE_HOURS: i64 = 18_000;
+pub(crate) const WEEK: i64 = 604_800;
 /// How far short of its whole length a Codex window may be and still be
 /// taken as not started.
 const IDLE_SLACK: i64 = 60;
@@ -379,6 +404,7 @@ pub fn parse_cursor(body: &Value) -> Usage {
     });
     let Some(percent) = percent.filter(|p| *p >= 0.0) else {
         return Usage {
+            balance: None,
             windows: Vec::new(),
             plan: name,
         };
@@ -399,6 +425,7 @@ pub fn parse_cursor(body: &Value) -> Usage {
         None => length_secs.is_some_and(|l| l <= WEEK + 86_400),
     };
     Usage {
+        balance: None,
         windows: vec![Window {
             label: if weekly { "week" } else { "month" }.into(),
             percent,
@@ -408,6 +435,53 @@ pub fn parse_cursor(body: &Value) -> Usage {
             idle: false,
         }],
         plan: name,
+    }
+}
+
+/// DeepSeek's `/user/balance`: `{is_available, balance_infos: [{currency,
+/// total_balance}]}`, amounts as text. The balance is also a `balance` limit,
+/// empty or full, so that running out switches the account like any other.
+pub fn parse_deepseek(body: &Value) -> Option<Usage> {
+    let infos = body.get("balance_infos")?.as_array()?;
+    let (amount, currency) = infos
+        .iter()
+        .filter_map(|info| {
+            let amount = info
+                .get("total_balance")?
+                .as_str()?
+                .trim()
+                .parse::<f64>()
+                .ok()?;
+            Some((amount, info.get("currency")?.as_str()?.to_owned()))
+        })
+        .max_by(|a, b| a.0.total_cmp(&b.0))?;
+    let available = body
+        .get("is_available")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let used_up = !available || amount <= 0.0;
+    Some(Usage {
+        windows: vec![Window {
+            label: "balance".into(),
+            percent: if used_up { 100.0 } else { 0.0 },
+            resets_at: None,
+            length_secs: None,
+            quiet: false,
+            idle: false,
+        }],
+        balance: Some(Balance { amount, currency }),
+        plan: None,
+    })
+}
+
+pub fn deepseek_report(result: Result<Value, FetchError>) -> UsageReport {
+    match result {
+        Ok(body) => parse_deepseek(&body).map_or_else(
+            || UsageReport::Failed("DeepSeek sent no balance".into()),
+            UsageReport::Ok,
+        ),
+        Err(FetchError::Unauthorized) => UsageReport::Unauthorized,
+        Err(FetchError::Other(message)) => UsageReport::Failed(message),
     }
 }
 
@@ -450,6 +524,7 @@ pub fn parse(body: &Value) -> Usage {
         }
     }
     Usage {
+        balance: None,
         windows,
         plan: None,
     }
@@ -575,6 +650,40 @@ fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
 
 #[cfg(test)]
 mod tests {
+    /// Against the DeepSeek key OpenCode holds on this computer, read only:
+    /// `cargo test -p pitstop-core real_deepseek -- --ignored --nocapture`.
+    /// A balance read costs nothing; prints the amount, never the key.
+    #[test]
+    #[ignore = "reads the real key and asks DeepSeek"]
+    fn real_deepseek_balance() {
+        use crate::provider::{provider_for, ProviderId};
+        let host = crate::host::RealHost::new();
+        let login = provider_for(ProviderId::DeepSeek)
+            .read_active(&host)
+            .unwrap()
+            .expect("OpenCode holds a DeepSeek key");
+        let key = crate::provider::deepseek::api_key(&login.blob).unwrap();
+        println!("{:?}", deepseek_report(Http::new().deepseek(&key)));
+    }
+
+    #[test]
+    fn deepseek_balance_is_read_and_an_empty_one_counts_as_a_used_up_limit() {
+        let funded = serde_json::json!({"is_available": true, "balance_infos": [
+            {"currency": "CNY", "total_balance": "3.00"},
+            {"currency": "USD", "total_balance": "110.00"}]});
+        let usage = parse_deepseek(&funded).unwrap();
+        assert_eq!(usage.windows[0].percent, 0.0);
+        let balance = usage.balance.unwrap();
+        assert_eq!((balance.amount, balance.currency.as_str()), (110.0, "USD"));
+
+        let empty = serde_json::json!({"is_available": false, "balance_infos": [
+            {"currency": "USD", "total_balance": "0.00"}]});
+        let usage = parse_deepseek(&empty).unwrap();
+        assert_eq!(usage.windows[0].percent, 100.0);
+
+        assert!(parse_deepseek(&serde_json::json!({})).is_none());
+    }
+
     use super::*;
 
     #[test]

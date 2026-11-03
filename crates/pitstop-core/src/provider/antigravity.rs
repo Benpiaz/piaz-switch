@@ -149,6 +149,7 @@ pub fn quota(blob: &[u8]) -> Option<Usage> {
     Some(Usage {
         windows,
         plan: None,
+        balance: None,
     })
 }
 
