@@ -1060,9 +1060,24 @@ function openRowMenu(x, y, tool, account) {
   if (!account.inUse) items.push({ title: t("useName", { name: account.name }), run: () => useAccount(tool, account) });
   items.push({ title: t("signInAgain"), run: () => openSignInAgain(tool, account), disabled: tool.installed === false });
   items.push({ title: t("rename"), run: () => openRename(tool, account) });
-  if (account.label) items.push({ separator: true }, { title: t("copyEmail"), run: () => copy(account.label) });
+  const site = WEB_SITES[tool.id];
+  if (site || account.label) items.push({ separator: true });
+  if (site) items.push({ title: t("openSite", { site }), run: () => openWebWindow(tool, account) });
+  if (account.label) items.push({ title: t("copyEmail"), run: () => copy(account.label) });
   items.push({ separator: true }, { title: t("forget"), danger: true, run: () => openForget(tool, account) });
   showMenu(x, y, items, `key:${rowKey(tool.id, account.name)}`);
+}
+
+/** The site each tool's accounts get a window on, signed in as that account. */
+const WEB_SITES = { "claude-code": "claude.ai", codex: "chatgpt.com" };
+
+async function openWebWindow(tool, account) {
+  try {
+    const opened = await invoke("open_web_window", { provider: tool.id, name: account.name });
+    if (opened === "browser") toast(t("siteInBrowser", { site: WEB_SITES[tool.id] }));
+  } catch (error) {
+    openAlert(t("couldntOpenSite", { site: WEB_SITES[tool.id] }), errorText(error));
+  }
 }
 
 function showMenu(x, y, items, returnKey) {

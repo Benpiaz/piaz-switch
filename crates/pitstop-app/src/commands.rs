@@ -303,6 +303,7 @@ pub async fn rename_account(
             if pid == ProviderId::ClaudeCode {
                 crate::warm::follow_rename(&app::host(), &name, &account.name);
             }
+            crate::webwin::follow_rename(&app, pid, &name, &account.name);
         }
         app::refresh(&app);
         renamed.map(|_| ()).map_err(|e| UiError::from(&e))
@@ -330,6 +331,9 @@ pub async fn forget_account(app: AppHandle, provider: String, name: String) -> A
         );
         if removed.is_ok() && pid == ProviderId::ClaudeCode {
             crate::warm::follow_forget(&app::host(), &name);
+        }
+        if removed.is_ok() {
+            crate::webwin::follow_forget(&app, pid, &name);
         }
         app::refresh(&app);
         removed
