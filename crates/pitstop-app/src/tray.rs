@@ -10,6 +10,8 @@ use crate::i18n::Lang;
 use crate::links;
 use crate::model::{self, MenuLine, Snapshot};
 use crate::settings;
+#[cfg(not(target_os = "macos"))]
+use crate::tray_look::{self, Look};
 
 const TRAY_ID: &str = "pitstop";
 
@@ -72,13 +74,45 @@ pub fn update(app: &AppHandle, snapshot: &Snapshot, lang: Lang) {
         }
         let _ = tray.set_menu(Some(menu));
     }
-    let title = model::tray_title(snapshot);
     #[cfg(target_os = "macos")]
-    let _ = tray.set_title(title.as_deref());
-    let _ = tray.set_tooltip(Some(match &title {
-        Some(title) => format!("Piaz Switch — {title}"),
-        None => "Piaz Switch".to_owned(),
-    }));
+    {
+        let title = model::tray_title(snapshot);
+        let _ = tray.set_title(title.as_deref());
+        let _ = tray.set_tooltip(Some(match &title {
+            Some(title) => format!("Piaz Switch — {title}"),
+            None => "Piaz Switch".to_owned(),
+        }));
+    }
+    // Elsewhere there is no title beside the icon: the icon shows the level
+    // and the tooltip says the rest.
+    #[cfg(not(target_os = "macos"))]
+    {
+        show_look(&tray, tray_look::look(snapshot));
+        let _ = tray.set_tooltip(Some(tray_look::tooltip(snapshot, lang)));
+    }
+    crate::jumplist::update(app, snapshot, lang);
+}
+
+/// The look the icon was last drawn with: it is drawn again only to change.
+#[cfg(not(target_os = "macos"))]
+static SHOWN: std::sync::Mutex<Option<Look>> = std::sync::Mutex::new(None);
+
+#[cfg(not(target_os = "macos"))]
+fn show_look(tray: &tauri::tray::TrayIcon, look: Look) {
+    let Ok(mut shown) = SHOWN.lock() else {
+        return;
+    };
+    if *shown == Some(look) {
+        return;
+    }
+    let base = icon();
+    let drawn = tray_look::draw(base.rgba(), base.width(), base.height(), look);
+    if tray
+        .set_icon(Some(Image::new_owned(drawn, base.width(), base.height())))
+        .is_ok()
+    {
+        *shown = Some(look);
+    }
 }
 
 fn build(app: &AppHandle, lines: &[MenuLine]) -> tauri::Result<Menu<Wry>> {

@@ -570,26 +570,14 @@ fn account_line(account: &AccountView, lang: Lang, now: i64) -> Option<String> {
 /// What the menu bar shows beside the icon (macOS) and the tooltip says
 /// (Windows): the account in use and its fullest limit, `work 42%`. A limit
 /// for one model counts only when there is no other.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn tray_title(snapshot: &Snapshot) -> Option<String> {
     let account = snapshot
         .tools
         .iter()
         .find_map(|t| t.accounts.iter().find(|a| a.in_use))?;
-    let fullest = windows_of(account).and_then(|windows| {
-        let windows: Vec<&WindowView> = windows.iter().filter(|w| !w.quiet).collect();
-        let general: Vec<f64> = windows
-            .iter()
-            .filter(|w| !w.label.starts_with("week "))
-            .map(|w| w.percent)
-            .collect();
-        let pool: Vec<f64> = if general.is_empty() {
-            windows.iter().map(|w| w.percent).collect()
-        } else {
-            general
-        };
-        pool.into_iter().reduce(f64::max)
-    });
-    Some(match fullest {
+    // The tray icon's bar follows the same limit.
+    Some(match crate::tray_look::fullest(account) {
         Some(percent) => format!("{} {percent:.0}%", account.name),
         None => account.name.clone(),
     })

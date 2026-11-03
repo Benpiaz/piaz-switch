@@ -242,6 +242,87 @@ impl Lang {
             (Lang::Vi, None) => format!("hết {window}"),
         }
     }
+
+    // ---------- tray tooltip, Jump List ----------
+
+    pub fn needs_attention(self) -> &'static str {
+        self.pick("Needs attention", "Cần xem lại")
+    }
+
+    /// An account's limits in the tooltip: `5-hour 42% used, weekly 12%`;
+    /// none when it has none.
+    pub fn tip_usage(self, parts: &[(String, f64)]) -> Option<String> {
+        let (first, rest) = parts.split_first()?;
+        let first = match self {
+            Lang::En => format!("{} {:.0}% used", first.0, first.1),
+            Lang::Vi => format!("đã dùng {} {:.0}%", first.0, first.1),
+        };
+        Some(
+            std::iter::once(first)
+                .chain(rest.iter().map(|(w, p)| format!("{w} {p:.0}%")))
+                .collect::<Vec<_>>()
+                .join(", "),
+        )
+    }
+
+    /// A Jump List task naming the tool too, once several tools have accounts.
+    pub fn switch_to_on(self, name: &str, tool: &str) -> String {
+        match self {
+            Lang::En => format!("Switch to {name} ({tool})"),
+            Lang::Vi => format!("Chuyển sang {name} ({tool})"),
+        }
+    }
+
+    pub fn add_account_task(self) -> &'static str {
+        self.pick("Add Account", "Thêm tài khoản")
+    }
+
+    pub fn couldnt_switch(self, name: &str) -> String {
+        match self {
+            Lang::En => format!("Couldn't switch to {name}"),
+            Lang::Vi => format!("Không chuyển được sang {name}"),
+        }
+    }
+
+    /// Why a switch from the Jump List didn't happen, in words: `code` is the
+    /// error's, `message` its English words for anything not worded here.
+    pub fn switch_failed_why(self, code: &str, name: &str, tool: &str, message: &str) -> String {
+        match (self, code) {
+            (Lang::En, "warmingUp") => {
+                format!(
+                    "{name} is warming up. Switch to it when the warm-up ends, in a few seconds."
+                )
+            }
+            (Lang::Vi, "warmingUp") => {
+                format!("{name} đang warm-up. Chờ vài giây cho xong rồi chuyển.")
+            }
+            (Lang::En, "editorMissing") => {
+                format!("Piaz Switch didn't find {tool} on this computer.")
+            }
+            (Lang::Vi, "editorMissing") => format!("Piaz Switch không thấy {tool} trên máy này."),
+            (Lang::En, "editorStillOpen" | "editorCloseYourself") => {
+                format!("{tool} is open. Close it, then switch again.")
+            }
+            (Lang::Vi, "editorStillOpen" | "editorCloseYourself") => {
+                format!("{tool} đang mở. Đóng nó rồi chuyển lại.")
+            }
+            (Lang::En, "signInRunning") => {
+                "Another sign-in is running. Switch when it ends.".to_owned()
+            }
+            (Lang::Vi, "signInRunning") => {
+                "Đang có một lần đăng nhập khác. Chờ xong rồi chuyển.".to_owned()
+            }
+            (Lang::En, "vaultBlobMissing" | "vaultCorrupt") => {
+                format!("Sign in to {name} again in Piaz Switch to switch to it.")
+            }
+            (Lang::Vi, "vaultBlobMissing" | "vaultCorrupt") => {
+                format!("Đăng nhập lại {name} trong Piaz Switch để chuyển sang nó.")
+            }
+            (Lang::En, "unknownAccount") => format!("{name} isn't in Piaz Switch any more."),
+            (Lang::Vi, "unknownAccount") => format!("{name} không còn trong Piaz Switch."),
+            _ => message.to_owned(),
+        }
+    }
 }
 
 /// `2h 09m`, `4d 2h`, `12m`: short enough for a menu line.
