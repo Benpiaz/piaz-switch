@@ -17,6 +17,7 @@ mod tray;
 mod updates;
 mod usage_logs;
 mod warm;
+mod webwin;
 
 use tauri::{Manager, RunEvent, WindowEvent};
 use tauri_plugin_autostart::MacosLauncher;
@@ -53,6 +54,7 @@ fn main() {
             commands::send_sign_in_code,
             commands::cancel_sign_in,
             commands::open_sign_in_page,
+            webwin::open_web_window,
             commands::set_language,
             commands::set_theme,
             commands::set_autostart,
@@ -86,10 +88,13 @@ fn main() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // Closing the window keeps Pitstop in the tray.
+            // Closing the window keeps Pitstop in the tray; an account's web
+            // window closes for good.
             if let WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                app::hide_window(window.app_handle());
+                if window.label() == "main" {
+                    api.prevent_close();
+                    app::hide_window(window.app_handle());
+                }
             }
         })
         .build(tauri::generate_context!())
