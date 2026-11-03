@@ -512,6 +512,26 @@ pub fn menu(snapshot: &Snapshot, lang: Lang, clock: &dyn Fn(i64) -> String) -> V
         title: lang.add_account().into(),
         enabled: true,
     });
+    // The site window of the account each tool is using: Claude Code's on
+    // claude.ai, Codex's on chatgpt.com.
+    for (provider, site) in [
+        (ProviderId::ClaudeCode, "claude.ai"),
+        (ProviderId::Codex, "chatgpt.com"),
+    ] {
+        let in_use = snapshot
+            .tools
+            .iter()
+            .filter(|t| t.id == provider.as_str())
+            .flat_map(|t| &t.accounts)
+            .find(|a| a.in_use);
+        if let Some(account) = in_use {
+            lines.push(MenuLine::Action {
+                id: format!("web|{}|{}", provider.as_str(), account.name),
+                title: lang.open_site_as(site, &account.name),
+                enabled: true,
+            });
+        }
+    }
     lines.push(MenuLine::Action {
         id: "refresh".into(),
         title: lang.refresh().into(),
@@ -881,6 +901,10 @@ mod tests {
             title: "Add Account…".into(),
             enabled: true
         }));
+        // The account in use has its site window a click away.
+        assert!(lines.iter().any(|l| matches!(l,
+            MenuLine::Action { id, title, .. }
+                if id.starts_with("web|claude-code|") && title.starts_with("Open claude.ai as "))));
         assert!(notes(&lines).contains(&"Updated 23:58"));
     }
 

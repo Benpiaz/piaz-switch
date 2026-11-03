@@ -27,6 +27,45 @@
   checks for a bug report, with paths starting at `~` and no email addresses.
   `piaz-switch doctor` runs the same checks, except the usage reads, and exits with
   1 when one fails.
+- **Notifications you can act on.** **Notify when a limit reaches the share**
+  (Settings → Automation, on by default) tells you once per limit and reset when the
+  account in use reaches the share, for Codex, Cursor and Antigravity, and for Claude
+  Code while it isn't switched automatically. It names the account to switch to (by
+  **Use first** for Claude Code) with a **Switch to …** button, or says when the limit
+  resets when no other account has room. Under **Week that resets first** without
+  automatic switching, the account whose week resets first is offered the same way,
+  once per account and week. A login the service refused is notified once, with
+  **Sign in again**. The run-out notice gets a **Switch to …** button and the
+  automatic switch's notice a **Switch back** button. A click on a notification opens
+  Piaz Switch, and what was notified isn't posted again after a restart.
+- **A tray icon that shows how much is left, a Jump List and a welcome.** On Windows
+  the tray icon carries a bar under the mark: full while the account in use has used
+  under 70% of its fullest limit, half from 70%, a sliver from 90%, and a badge when
+  something needs you (a login to sign in again, an account that ran out, a tool that
+  went missing). Its tooltip names each account in use with how much of each limit it
+  used. Right-clicking Piaz Switch on the taskbar, or where it's pinned in Start,
+  offers **Switch to …** for each account and **Add Account**; a switch from there
+  happens without opening the window, and a notification says why when it can't. The
+  first time Piaz Switch opens with no account, a welcome sheet shows the tools it
+  found, where its icon lives, and **Open at login**.
+- **A claude.ai or chatgpt.com window for each account.** An account's menu offers
+  **Open claude.ai** (Claude Code) or **Open chatgpt.com** (Codex), and the tray menu
+  does the same for the account in use. Each window keeps a web profile of its own,
+  so it stays signed in to that account on the site (sign in once there; on macOS
+  this needs macOS 14 or later, older versions open the site in your browser). The
+  page can't reach Piaz Switch, links elsewhere open in your browser, and renaming or
+  forgetting the account moves or deletes its profile.
+- **Claude Code status line** (Settings → Command line): **Status line in Claude
+  Code** adds a line under every Claude Code session with each account's 5-hour and
+  weekly use, the one in use first with its pace (▲ ahead, ▼ behind), read from what
+  Piaz Switch last read (`?` when that's over 15 minutes old). It's added only where
+  Claude Code has no status line of its own, keeps every other setting, and
+  **Remove** takes out only ours; `piaz-switch statusline` prints the same.
+- **Keep saved sign-ins fresh** (Settings → Command line): Task Scheduler (Windows)
+  or a LaunchAgent (macOS) renews parked Claude Code logins once a day while Piaz
+  Switch is closed, so one left alone for weeks doesn't expire; it never runs
+  alongside the open app. `piaz-switch renew` and
+  `piaz-switch schedule install|uninstall|status` do the same from the command line.
 
 ## [0.5.5] - 2026-11-03
 

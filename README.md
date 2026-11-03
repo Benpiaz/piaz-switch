@@ -40,6 +40,11 @@ people who use more than one **Claude Code**, **Codex**, **Cursor** or
 - **See what changed and check what's wrong**: an **Activity** log of every switch,
   sign-in, renewal and warm-up, and **Diagnostics** that check each tool, the login
   in use and every parked login, with a report to copy into a bug report.
+- **Act from where you are**: notifications with **Switch to …**, **Switch back** and
+  **Sign in again** buttons; on Windows a tray icon that shows how much the account in
+  use has left and a taskbar Jump List to switch accounts; a claude.ai or chatgpt.com
+  window signed in to each account; and a Claude Code status line with every
+  account's 5-hour and weekly use.
 - **See what you used and what it would cost** at API prices, from the logs on your
   own computer.
 - **Private by design**: no server, no telemetry, no account of ours. Parked logins
@@ -270,6 +275,9 @@ piaz-switch rename work job    # rename, keeping the parked login
 piaz-switch remove job         # forget an account and delete its parked credential
 piaz-switch log                # the last changes, from the app and the command line
 piaz-switch doctor             # check the folder, the vault key, each tool and every parked login
+piaz-switch statusline         # the line Claude Code shows under a session (Settings adds it for you)
+piaz-switch renew              # renew parked Claude Code logins now, while the app is closed
+piaz-switch schedule install   # do that once a day (also: uninstall, status)
 ```
 
 ### Usage (best-effort)
@@ -419,6 +427,19 @@ còn bao nhiêu hạn mức (5 giờ, tuần, tháng, theo model).
   đăng nhập, gia hạn, warm-up; và phần kiểm tra từng công cụ, đăng nhập đang dùng,
   từng đăng nhập đã cất, kèm báo cáo để sao chép khi báo lỗi. Dòng lệnh có
   `piaz-switch log` và `piaz-switch doctor`.
+- **Thông báo có nút bấm**: báo khi một giới hạn chạm mức (kèm nút **Chuyển sang …**),
+  khi có tài khoản reset tuần sớm hơn, khi đăng nhập bị từ chối (nút **Đăng nhập
+  lại**), và nút **Chuyển lại** sau mỗi lần tự chuyển.
+- **Icon khay báo mức dùng, Jump List và màn hình chào**: icon trên khay có thanh báo
+  tài khoản đang dùng còn bao nhiêu và dấu cảnh báo khi cần xử lý; chuột phải vào
+  Piaz Switch trên thanh tác vụ để **Chuyển sang …** từng tài khoản hoặc **Thêm tài
+  khoản**; lần đầu mở app có màn hình chào.
+- **Cửa sổ claude.ai / chatgpt.com riêng cho từng tài khoản**: menu của tài khoản có
+  **Mở claude.ai** hoặc **Mở chatgpt.com**, mỗi cửa sổ giữ đăng nhập web riêng của
+  đúng tài khoản đó.
+- **Status line cho Claude Code và gia hạn hằng ngày** (Cài đặt → Dòng lệnh): hiện mức
+  dùng 5 giờ/tuần của mọi tài khoản dưới mỗi phiên Claude Code, và để máy tự gia hạn
+  đăng nhập đã cất mỗi ngày khi Piaz Switch đang đóng.
 - **Tự cập nhật**: app báo khi có bản mới, bạn bấm là cài.
 - **Riêng tư**: không có máy chủ, không thu thập dữ liệu. Thông tin đăng nhập được mã
   hóa AES-256-GCM ngay trên máy bạn, khóa nằm trong kho khóa của hệ điều hành; mỗi

@@ -375,6 +375,14 @@ impl Lang {
         }
     }
 
+    /// The tray's line for an account's site window: `Open claude.ai as work`.
+    pub fn open_site_as(self, site: &str, name: &str) -> String {
+        match self {
+            Lang::En => format!("Open {site} as {name}"),
+            Lang::Vi => format!("Mở {site} bằng {name}"),
+        }
+    }
+
     pub fn add_account_task(self) -> &'static str {
         self.pick("Add Account", "Thêm tài khoản")
     }

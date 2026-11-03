@@ -182,6 +182,19 @@ fn chosen(app: &AppHandle, id: &str) {
             std::thread::spawn(move || app::read_usage(&owned));
         }
         ["open"] => app::show_window(app),
+        // Built off the menu's thread: making a window from inside its own
+        // event can stall on Windows.
+        ["web", provider, name] => {
+            if let Ok(pid) = pitstop_core::ProviderId::parse(provider) {
+                let name = (*name).to_owned();
+                std::thread::spawn(move || {
+                    if let Err(error) = crate::webwin::open(&owned, pid, &name) {
+                        crate::app::notify(&owned, &error.message, "");
+                    }
+                });
+            }
+            return;
+        }
         ["link", name] => {
             if let Err(error) = links::open(app, name) {
                 link_failed(app, name, &error.message);

@@ -324,6 +324,7 @@ mod tests {
                 auto_switch_at: 90,
                 use_first: crate::duty::UseFirst::MostLeft,
                 notify_run_out: true,
+                notify_near: true,
                 warm_from: "07:00".into(),
                 warm_to: "23:00".into(),
                 warm_up: Vec::new(),
