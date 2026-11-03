@@ -272,6 +272,8 @@ const STRINGS = {
     aboutAdding: "Add accounts with Add Account rather than with /login or codex login, and don’t log out in the tools: logging out ends the login Piaz Switch parked.",
     madeBy: "Made by {author}. Follow along for new versions and tips:",
     byAuthor: "by {author}",
+    collapseSidebar: "Collapse Sidebar",
+    expandSidebar: "Expand Sidebar",
     linkWebsite: "Website",
     couldntOpen: "Couldn’t open the link",
     // errors the window words itself; {name} is the account an error is about
@@ -557,6 +559,8 @@ const STRINGS = {
     aboutAdding: "Thêm tài khoản bằng nút Thêm tài khoản, đừng dùng /login hay codex login, và đừng đăng xuất trong tool: đăng xuất sẽ huỷ login mà Piaz Switch đã park.",
     madeBy: "Làm bởi {author}. Theo dõi để nhận bản mới và mẹo dùng:",
     byAuthor: "bởi {author}",
+    collapseSidebar: "Thu gọn thanh bên",
+    expandSidebar: "Mở rộng thanh bên",
     linkWebsite: "Trang web",
     couldntOpen: "Không mở được link",
     err: {

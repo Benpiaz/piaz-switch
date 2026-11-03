@@ -152,6 +152,7 @@
   --ease-decel: cubic-bezier(0.165, 0.84, 0.44, 1);
 
   --sidebar-width: 208px;
+  --rail-width: 56px;
   --column: 820px;
   --gutter: 28px;
 }
@@ -299,19 +300,62 @@
 
   /* ---------- sidebar ---------- */
 
+  /* The sidebar folds into a rail of icons: its width eases, names fade and
+     are clipped, and every icon keeps its place so nothing jumps. The brand
+     and the fold button head it; Settings sits at its foot, apart. */
   .sidebar {
-    @apply flex flex-none flex-col bg-base px-2.5 pb-3;
+    @apply flex flex-none flex-col overflow-hidden bg-base px-2.5 pb-3;
     width: var(--sidebar-width);
     box-shadow: inset calc(var(--hair) * -1) 0 0 var(--line);
+    transition:
+      width var(--dur-sheet) var(--ease-decel),
+      padding var(--dur-sheet) var(--ease-decel);
   }
 
-  .sidebar-top {
-    height: 16px;
+  .app.collapsed .sidebar {
+    width: var(--rail-width);
+  }
+
+  .sidebar-head {
+    display: flex;
+    align-items: center;
+    height: 52px;
     flex: none;
+    margin-bottom: 6px;
   }
 
-  body.mac .sidebar-top {
+  /* The window's buttons own the top-left corner on macOS (to about 62px):
+     the fold button sits right of them, and under them in a rail made wide
+     enough that they never cross its edge. */
+  body.mac {
+    --rail-width: 72px;
+  }
+
+  body.mac .app.collapsed .sidebar {
+    padding-inline: 18px;
+  }
+
+  body.mac .sidebar-head {
     height: 48px;
+    justify-content: flex-end;
+    transition:
+      height var(--dur-sheet) var(--ease-decel),
+      padding var(--dur-sheet) var(--ease-decel);
+  }
+
+  body.mac .app.collapsed .sidebar-head {
+    height: 84px;
+    padding-top: 40px;
+  }
+
+  body.mac .brand {
+    display: none;
+  }
+
+  /* As wide as a rail's items, so folded it lines up with their icons. */
+  .sidebar-head .sidebar-toggle {
+    width: 36px;
+    height: 32px;
   }
 
   .nav {
@@ -319,10 +363,22 @@
   }
 
   .nav-item {
-    @apply flex h-[34px] w-full items-center gap-2.5 rounded-control border-0 bg-transparent px-2.5 text-left text-ink-2;
+    @apply flex h-[34px] w-full flex-none items-center gap-2.5 overflow-hidden rounded-control border-0 bg-transparent pr-2.5 pl-[9px] text-left text-ink-2;
     transition:
       background-color var(--dur-base) var(--ease-out),
       color var(--dur-base) var(--ease-out);
+  }
+
+  .nav-item span,
+  .sidebar-version {
+    white-space: nowrap;
+    transition: opacity var(--dur-base) var(--ease-out);
+  }
+
+  .app.collapsed .nav-item span,
+  .app.collapsed .brand,
+  .app.collapsed .sidebar-version {
+    opacity: 0;
   }
 
   .nav-item:hover {
@@ -347,16 +403,30 @@
   }
 
   .brand {
-    margin-top: auto;
     display: flex;
+    flex: 1;
+    min-width: 0;
     align-items: center;
-    gap: 10px;
-    padding: 8px 10px 0;
+    gap: 9px;
+    padding-left: 6px;
+    overflow: hidden;
+    transition:
+      opacity var(--dur-base) var(--ease-out),
+      padding var(--dur-sheet) var(--ease-decel);
+  }
+
+  .app.collapsed .brand {
+    padding-left: 0;
+  }
+
+  /* The brand is part of the window's drag region, words and all. */
+  .brand > * {
+    pointer-events: none;
   }
 
   .brand-mark {
-    width: 26px;
-    height: 26px;
+    width: 24px;
+    height: 24px;
     flex: none;
     color: var(--accent);
   }
@@ -368,12 +438,23 @@
 
   .brand-name {
     font-family: var(--font-display);
-    font-size: 16px;
-    line-height: 18px;
+    font-size: 17px;
+    line-height: 22px;
+    letter-spacing: -0.01em;
     color: var(--ink);
   }
 
-  .brand-version {
+  .sidebar-foot {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: auto;
+    padding-top: 8px;
+    box-shadow: inset 0 var(--hair) 0 var(--line);
+  }
+
+  .sidebar-version {
+    padding: 0 9px;
     font-size: 11px;
     line-height: 14px;
     color: var(--ink-2);
@@ -2020,6 +2101,13 @@
     .status-dot,
     .sk {
       animation: none;
+    }
+
+    /* The sidebar folds at once; its names still fade. */
+    .sidebar,
+    .brand,
+    body.mac .sidebar-head {
+      transition: none;
     }
 
     .button.copied svg path[pathLength] {

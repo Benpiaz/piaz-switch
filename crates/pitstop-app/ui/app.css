@@ -284,6 +284,7 @@
   --ease-pop: cubic-bezier(0.34, 1.3, 0.64, 1);
   --ease-decel: cubic-bezier(0.165, 0.84, 0.44, 1);
   --sidebar-width: 208px;
+  --rail-width: 56px;
   --column: 820px;
   --gutter: 28px;
 }
@@ -401,18 +402,45 @@
     display: flex;
     flex: none;
     flex-direction: column;
+    overflow: hidden;
     background-color: var(--surface-base);
     padding-inline: calc(var(--spacing) * 2.5);
     padding-bottom: calc(var(--spacing) * 3);
     width: var(--sidebar-width);
     box-shadow: inset calc(var(--hair) * -1) 0 0 var(--line);
+    transition: width var(--dur-sheet) var(--ease-decel), padding var(--dur-sheet) var(--ease-decel);
   }
-  .sidebar-top {
-    height: 16px;
+  .app.collapsed .sidebar {
+    width: var(--rail-width);
+  }
+  .sidebar-head {
+    display: flex;
+    align-items: center;
+    height: 52px;
     flex: none;
+    margin-bottom: 6px;
   }
-  body.mac .sidebar-top {
+  body.mac {
+    --rail-width: 72px;
+  }
+  body.mac .app.collapsed .sidebar {
+    padding-inline: 18px;
+  }
+  body.mac .sidebar-head {
     height: 48px;
+    justify-content: flex-end;
+    transition: height var(--dur-sheet) var(--ease-decel), padding var(--dur-sheet) var(--ease-decel);
+  }
+  body.mac .app.collapsed .sidebar-head {
+    height: 84px;
+    padding-top: 40px;
+  }
+  body.mac .brand {
+    display: none;
+  }
+  .sidebar-head .sidebar-toggle {
+    width: 36px;
+    height: 32px;
   }
   .nav {
     display: flex;
@@ -423,16 +451,26 @@
     display: flex;
     height: 34px;
     width: 100%;
+    flex: none;
     align-items: center;
     gap: calc(var(--spacing) * 2.5);
+    overflow: hidden;
     border-radius: var(--r-md);
     border-style: var(--tw-border-style);
     border-width: 0px;
     background-color: transparent;
-    padding-inline: calc(var(--spacing) * 2.5);
+    padding-right: calc(var(--spacing) * 2.5);
+    padding-left: 9px;
     text-align: left;
     color: var(--ink-2);
     transition: background-color var(--dur-base) var(--ease-out), color var(--dur-base) var(--ease-out);
+  }
+  .nav-item span, .sidebar-version {
+    white-space: nowrap;
+    transition: opacity var(--dur-base) var(--ease-out);
+  }
+  .app.collapsed .nav-item span, .app.collapsed .brand, .app.collapsed .sidebar-version {
+    opacity: 0;
   }
   .nav-item:hover {
     background: var(--fill-hover);
@@ -452,15 +490,24 @@
     color: var(--accent);
   }
   .brand {
-    margin-top: auto;
     display: flex;
+    flex: 1;
+    min-width: 0;
     align-items: center;
-    gap: 10px;
-    padding: 8px 10px 0;
+    gap: 9px;
+    padding-left: 6px;
+    overflow: hidden;
+    transition: opacity var(--dur-base) var(--ease-out), padding var(--dur-sheet) var(--ease-decel);
+  }
+  .app.collapsed .brand {
+    padding-left: 0;
+  }
+  .brand > * {
+    pointer-events: none;
   }
   .brand-mark {
-    width: 26px;
-    height: 26px;
+    width: 24px;
+    height: 24px;
     flex: none;
     color: var(--accent);
   }
@@ -470,11 +517,21 @@
   }
   .brand-name {
     font-family: var(--font-display);
-    font-size: 16px;
-    line-height: 18px;
+    font-size: 17px;
+    line-height: 22px;
+    letter-spacing: -0.01em;
     color: var(--ink);
   }
-  .brand-version {
+  .sidebar-foot {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: auto;
+    padding-top: 8px;
+    box-shadow: inset 0 var(--hair) 0 var(--line);
+  }
+  .sidebar-version {
+    padding: 0 9px;
     font-size: 11px;
     line-height: 14px;
     color: var(--ink-2);
@@ -1853,6 +1910,9 @@
     }
     .status-dot, .sk {
       animation: none;
+    }
+    .sidebar, .brand, body.mac .sidebar-head {
+      transition: none;
     }
     .button.copied svg path[pathLength] {
       animation: none;

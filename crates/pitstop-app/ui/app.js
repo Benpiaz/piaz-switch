@@ -64,6 +64,8 @@ function h(tag, attrs, ...children) {
 const ICONS = {
   accounts:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c0-3.2 2.5-5.5 5.5-5.5s5.5 2.3 5.5 5.5"/><circle cx="16.6" cy="9" r="2.6"/><path d="M15.6 13.6c.3-.1.7-.1 1-.1 2.7 0 4.4 2 4.4 4.9"/></svg>',
+  sidebar:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M9.5 4.5v15M5.9 8.5h1.4M5.9 11h1.4"/></svg>',
   settings:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
   refresh:
@@ -307,6 +309,30 @@ function applyTheme(choice) {
 applyTheme(themeChoice);
 systemDark.addEventListener("change", () => applyTheme(themeChoice));
 
+// ---------- sidebar ----------
+
+// The sidebar folds into a rail of icons and stays as it was left, kept
+// locally like the theme so the first frame already has it.
+let sidebarCollapsed = localStorage.getItem("sidebar") === "collapsed";
+const isMac = navigator.userAgent.includes("Mac");
+
+function applySidebar() {
+  document.querySelector(".app").classList.toggle("collapsed", sidebarCollapsed);
+}
+
+function toggleSidebar() {
+  sidebarCollapsed = !sidebarCollapsed;
+  localStorage.setItem("sidebar", sidebarCollapsed ? "collapsed" : "open");
+  // A menu would stay where its row was; only the sidebar is drawn again.
+  closeMenu();
+  const focusKey = focusKeyOf(document.activeElement);
+  applySidebar();
+  renderNav();
+  refocus(document.getElementById("sidebar"), focusKey);
+}
+
+applySidebar();
+
 // ---------- the window ----------
 
 // A render replaces the buttons: one landing between the press and the
@@ -349,6 +375,7 @@ function render() {
 }
 
 function renderNav() {
+  // Folded into a rail, an item keeps only its icon: its name becomes the tooltip.
   const item = (id, iconName, label) =>
     keyed(
       h(
@@ -356,6 +383,7 @@ function renderNav() {
         {
           class: "nav-item",
           "aria-current": pane === id ? "page" : null,
+          title: sidebarCollapsed ? label : null,
           onclick: () => {
             pane = id;
             render();
@@ -366,17 +394,38 @@ function renderNav() {
       ),
       `nav-${id}`,
     );
-  document.getElementById("nav").replaceChildren(item("accounts", "accounts", t("accounts")), item("usage", "usage", t("usage")), item("settings", "settings", t("settings")));
+  const toggleLabel = sidebarCollapsed ? t("expandSidebar") : t("collapseSidebar");
+  const toggle = h(
+    "button",
+    {
+      class: "icon-button sidebar-toggle",
+      "aria-label": toggleLabel,
+      "aria-expanded": sidebarCollapsed ? "false" : "true",
+      "aria-controls": "sidebar",
+      "aria-keyshortcuts": isMac ? "Meta+B" : "Control+B",
+      title: `${toggleLabel} (${isMac ? "⌘B" : "Ctrl+B"})`,
+      onclick: toggleSidebar,
+    },
+    icon("sidebar"),
+  );
   document
-    .getElementById("brand")
+    .getElementById("sidebar-head")
     .replaceChildren(
-      h("span", { class: "brand-mark", "aria-hidden": "true" }, icon("mark")),
       h(
         "div",
-        null,
-        h("div", { class: "brand-name", text: APP_NAME }),
-        h("div", { class: "brand-version", text: snap ? `${snap.version} · ${t("byAuthor", { author: AUTHOR })}` : t("byAuthor", { author: AUTHOR }) }),
+        { class: "brand", "data-tauri-drag-region": true },
+        h("span", { class: "brand-mark", "aria-hidden": "true" }, icon("mark")),
+        h("span", { class: "brand-name", text: APP_NAME }),
       ),
+      keyed(toggle, "sidebar-toggle"),
+    );
+  document.getElementById("nav").replaceChildren(item("accounts", "accounts", t("accounts")), item("usage", "usage", t("usage")));
+  const credit = t("byAuthor", { author: AUTHOR });
+  document
+    .getElementById("sidebar-foot")
+    .replaceChildren(
+      item("settings", "settings", t("settings")),
+      h("div", { class: "sidebar-version", "aria-hidden": sidebarCollapsed ? "true" : null, text: snap ? `${snap.version} · ${credit}` : credit }),
     );
 }
 
@@ -2060,6 +2109,9 @@ document.addEventListener("keydown", (event) => {
     event.preventDefault();
     pane = "settings";
     render();
+  } else if (mod && key === "b" && !event.shiftKey && !event.altKey) {
+    event.preventDefault();
+    if (!dialog && !event.repeat) toggleSidebar();
   }
 });
 
@@ -2086,10 +2138,12 @@ window.addEventListener("blur", () => {
   closeMenu();
   hideEmails();
 });
-window.addEventListener("resize", updateFades);
+// The pane changes size with the window and as the sidebar folds; what fits
+// changes with it.
+new ResizeObserver(updateFades).observe(document.getElementById("pane"));
 
 async function start() {
-  if (navigator.userAgent.includes("Mac")) document.body.classList.add("mac");
+  if (isMac) document.body.classList.add("mac");
   document.getElementById("pane").addEventListener("scroll", updateFades, { passive: true });
   await listen("snapshot", (next) => {
     // Snapshots can arrive out of order; an older one never replaces a newer.
