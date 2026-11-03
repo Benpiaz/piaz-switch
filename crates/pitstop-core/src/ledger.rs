@@ -431,9 +431,11 @@ impl Ledger {
             log: match tool {
                 ProviderId::Codex => Log::Codex(CodexLog::default()),
                 // Only Claude Code's and Codex's logs are walked.
-                ProviderId::ClaudeCode | ProviderId::Cursor | ProviderId::Antigravity => {
-                    Log::Claude(ClaudeLog::default())
-                }
+                ProviderId::ClaudeCode
+                | ProviderId::Cursor
+                | ProviderId::Antigravity
+                | ProviderId::DeepSeek
+                | ProviderId::Grok => Log::Claude(ClaudeLog::default()),
             },
         };
         let scan = self.files.entry(path.to_path_buf()).or_insert_with(fresh);

@@ -20,7 +20,24 @@ mod warm;
 use tauri::{Manager, RunEvent, WindowEvent};
 use tauri_plugin_autostart::MacosLauncher;
 
+/// Claude Code runs the app this way as its status line: it saves the limits
+/// Claude Code reports and prints nothing, so no window and no tray start.
+fn feed_status_line() {
+    use std::io::Read;
+    let mut input = String::new();
+    if std::io::stdin().read_to_string(&mut input).is_ok() {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs() as i64);
+        let _ = pitstop_core::claude_live::save(&pitstop_core::RealHost::new(), &input, now);
+    }
+}
+
 fn main() {
+    if std::env::args().any(|a| a == pitstop_core::claude_live::STATUS_LINE_FLAG) {
+        feed_status_line();
+        return;
+    }
     // Started with the session: tray only, no window. Not right after an
     // update, though, which starts the new version with the old one's flags.
     let updated = updates::just_updated();
@@ -55,6 +72,7 @@ fn main() {
             commands::set_language,
             commands::set_theme,
             commands::set_autostart,
+            commands::enable_status_line,
             commands::dismiss_tip,
             commands::set_automation,
             commands::set_warm_up,

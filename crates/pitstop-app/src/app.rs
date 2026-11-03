@@ -92,6 +92,7 @@ pub fn refresh(app: &AppHandle) {
     let settings = settings::load(&host);
     let lang = Lang::resolve(settings.language.as_deref());
     let autostart = app.autolaunch().is_enabled().unwrap_or(false);
+    let status_line = pitstop_core::claude_live::status_line_installed(&host);
     let engine = Engine::new(host);
 
     // Copy what the snapshot needs, then read the accounts (files, and the
@@ -123,6 +124,7 @@ pub fn refresh(app: &AppHandle) {
             settings: &settings,
             language: lang,
             autostart,
+            status_line,
             warm: &warm,
         },
     );
@@ -299,6 +301,15 @@ pub fn warming(app: &AppHandle, provider: ProviderId, name: &str) -> bool {
         })
 }
 
+/// The tools Piaz Switch moves to another account by itself when one runs
+/// out: those that read a login on every new session, so a switch reaches
+/// the next one at no cost to the work in progress.
+const AUTO_SWITCHED: [ProviderId; 3] = [
+    ProviderId::ClaudeCode,
+    ProviderId::DeepSeek,
+    ProviderId::Grok,
+];
+
 fn duties(app: &AppHandle) {
     let Some(snapshot) = snapshot(app) else {
         return;
@@ -315,10 +326,13 @@ fn duties(app: &AppHandle) {
         .find(|t| t.id == ProviderId::ClaudeCode.as_str());
 
     if settings.auto_switch {
-        if let Some(plan) =
-            claude.and_then(|tool| duty::switch_target(tool, settings.auto_switch_at, now()))
-        {
-            auto_switch(app, lang, &plan);
+        for pid in AUTO_SWITCHED {
+            let tool = snapshot.tools.iter().find(|t| t.id == pid.as_str());
+            if let Some(plan) =
+                tool.and_then(|tool| duty::switch_target(tool, settings.auto_switch_at, now()))
+            {
+                auto_switch(app, lang, pid, &plan);
+            }
         }
     }
     if settings.notify_run_out {
@@ -345,8 +359,8 @@ fn duties(app: &AppHandle) {
     }
 }
 
-fn auto_switch(app: &AppHandle, lang: Lang, plan: &duty::SwitchPlan) {
-    let key = plan.key(ProviderId::ClaudeCode.as_str());
+fn auto_switch(app: &AppHandle, lang: Lang, pid: ProviderId, plan: &duty::SwitchPlan) {
+    let key = plan.key(pid.as_str());
     let state = app.state::<AppState>();
     {
         let Ok(mut auto) = state.automatic.lock() else {
@@ -358,8 +372,8 @@ fn auto_switch(app: &AppHandle, lang: Lang, plan: &duty::SwitchPlan) {
         }
         *tries += 1;
     }
-    let tool = ProviderId::ClaudeCode.display_name();
-    match crate::commands::switch(app, ProviderId::ClaudeCode, &plan.to, false, false) {
+    let tool = pid.display_name();
+    match crate::commands::switch(app, pid, &plan.to, false, false) {
         Ok(done) if done.switched => {
             if let Ok(mut auto) = state.automatic.lock() {
                 auto.sent.insert(key);
