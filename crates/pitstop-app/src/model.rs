@@ -46,6 +46,7 @@ pub struct Automation {
     pub auto_switch_at: u8,
     pub use_first: crate::duty::UseFirst,
     pub notify_run_out: bool,
+    pub notify_near: bool,
     pub warm_from: String,
     pub warm_to: String,
     /// One per Claude Code account.
@@ -232,6 +233,7 @@ pub fn build<H: Host>(engine: &Engine<H>, input: &Input) -> Snapshot {
             auto_switch_at: input.settings.auto_switch_at,
             use_first: input.settings.use_first,
             notify_run_out: input.settings.notify_run_out,
+            notify_near: input.settings.notify_near,
             warm_from: input.settings.warm_from.clone(),
             warm_to: input.settings.warm_to.clone(),
             warm_up: Vec::new(),

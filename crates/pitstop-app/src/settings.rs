@@ -25,6 +25,9 @@ pub struct Settings {
     pub use_first: crate::duty::UseFirst,
     /// Notify when the account in use runs out and another has room.
     pub notify_run_out: bool,
+    /// Notify once a limit of the account in use reaches `auto_switch_at`,
+    /// for a tool that isn't switched by itself.
+    pub notify_near: bool,
     /// Claude Code accounts, by name, whose next five-hour period is started
     /// as soon as the last one ends.
     pub warm_up: Vec<String>,
@@ -46,6 +49,7 @@ impl Default for Settings {
             auto_switch_at: 90,
             use_first: crate::duty::UseFirst::MostLeft,
             notify_run_out: true,
+            notify_near: true,
             warm_up: Vec::new(),
             warm_from: "07:00".into(),
             warm_to: "23:00".into(),
@@ -101,6 +105,7 @@ mod tests {
         assert_eq!(settings.auto_switch_at, 90);
         assert_eq!(settings.use_first, crate::duty::UseFirst::MostLeft);
         assert!(settings.notify_run_out);
+        assert!(settings.notify_near);
         assert!(settings.warm_up.is_empty());
         assert_eq!(settings.warm_from, "07:00");
         assert_eq!(settings.warm_to, "23:00");
@@ -114,6 +119,7 @@ mod tests {
             auto_switch_at: 80,
             use_first: crate::duty::UseFirst::ResetsSoonest,
             notify_run_out: false,
+            notify_near: false,
             warm_up: vec!["ben2".into()],
             warm_from: "06:30".into(),
             warm_to: "01:00".into(),
