@@ -23,6 +23,7 @@ pub mod usage;
 pub mod usage_cache;
 pub mod vault;
 pub mod vscdb;
+pub mod web_profile;
 
 pub use engine::Engine;
 pub use error::Error;

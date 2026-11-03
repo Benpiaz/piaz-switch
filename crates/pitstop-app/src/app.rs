@@ -309,17 +309,44 @@ pub fn in_use_name(provider: ProviderId) -> Option<String> {
     }
 }
 
-/// A switch the user made from `from`: it goes in the log, and `from` is not
-/// switched back to before the threshold this week.
+/// A switch the user made from `from` to `to`: it goes in the log (so `from`
+/// isn't switched back to before the threshold this week, nor `to` left
+/// before it), and the limits `to` was already at the threshold of are held:
+/// the automatic switch doesn't take Claude Code away from it for them, and
+/// their notices are moot, until each resets. A Switch back stays put.
 pub fn switched_by_hand(app: &AppHandle, provider: ProviderId, from: Option<&str>, to: &str) {
-    let entry = Entry::new(now(), verb::USE, By::App)
+    let host = host();
+    let at = now();
+    let entry = Entry::new(at, verb::USE, By::App)
         .provider(provider)
         .account(to)
         .from(from);
-    log(&host(), entry.clone());
+    log(&host, entry.clone());
+    let threshold = settings::load(&host).auto_switch_at;
+    let held = snapshot(app)
+        .and_then(|snapshot| {
+            let tool = snapshot.tools.iter().find(|t| t.id == provider.as_str())?;
+            let account = tool.accounts.iter().find(|a| a.name == to)?;
+            Some(duty::held_limits(tool.id, account, threshold, at))
+        })
+        .unwrap_or_default();
     let state = app.state::<AppState>();
     if let Ok(mut auto) = state.automatic.lock() {
         auto.switched(entry);
+        if !held.is_empty() {
+            let notified = auto.notified(&host, at);
+            for limit in &held {
+                let until = Notified::until(limit.resets_at, at);
+                notified.insert(format!("{}{}", duty::HELD, limit.key), until);
+                // The run-out notice goes by the same key, the near one by its own.
+                notified.insert(limit.key.clone(), until);
+                notified.insert(
+                    duty::near_key(provider.as_str(), to, &limit.label, limit.resets_at),
+                    until,
+                );
+            }
+            notified.save(&host);
+        }
     };
 }
 
@@ -431,9 +458,27 @@ fn duties(app: &AppHandle) {
         .find(|t| t.id == ProviderId::ClaudeCode.as_str());
 
     if settings.auto_switch {
+        // Limits the user switched to an account at, by hand: left alone.
+        let held: HashSet<String> = {
+            let state = app.state::<AppState>();
+            let held = state.automatic.lock().map(|mut auto| {
+                auto.notified(&host, now())
+                    .keys()
+                    .iter()
+                    .filter_map(|k| k.strip_prefix(duty::HELD).map(str::to_owned))
+                    .collect()
+            });
+            held.unwrap_or_default()
+        };
         let plan = claude.and_then(|tool| {
-            duty::switch_target(tool, settings.auto_switch_at, settings.use_first, now())
-                .or_else(|| early_plan(app, &host, &snapshot, &settings, tool, &HashSet::new()))
+            duty::switch_target_holding(
+                tool,
+                settings.auto_switch_at,
+                settings.use_first,
+                &held,
+                now(),
+            )
+            .or_else(|| early_plan(app, &host, &snapshot, &settings, tool))
         });
         if let Some(plan) = plan {
             auto_switch(app, &host, lang, &plan);
@@ -512,6 +557,7 @@ fn notices(
     if settings.notify_near {
         for notice in duty::near_notices(
             &snapshot.tools,
+            &snapshot.suggestions,
             settings.auto_switch_at,
             settings.use_first,
             settings.auto_switch,
@@ -552,9 +598,9 @@ fn notices(
         // switch it would have made before the share is offered instead,
         // once per account and week.
         if !settings.auto_switch && settings.use_first == duty::UseFirst::ResetsSoonest {
-            let posted = duty::resets_first_spent(notified.iter());
-            let plan =
-                claude.and_then(|tool| early_plan(app, host, snapshot, settings, tool, &posted));
+            // Only the account that comes first; once offered, not again
+            // (its key is in `sent`), and no other in its place.
+            let plan = claude.and_then(|tool| early_plan(app, host, snapshot, settings, tool));
             if let Some((plan, early)) = plan.and_then(|p| p.early.map(|e| (p, e))) {
                 let key = duty::resets_first_key(&plan.to, early.to_resets);
                 if !sent.contains(&key) {
@@ -632,16 +678,15 @@ fn notices(
 }
 
 /// A switch before the threshold to the account whose week resets first,
-/// when that order is chosen: only on a recent reading, and not within a few
-/// minutes of any switch, from here or from the command line. `also_spent`
-/// holds more accounts to leave out, by [`duty::early_key`].
+/// when that order is chosen: only on a recent reading, not within a few
+/// minutes of any switch, from here or from the command line, and never away
+/// from an account the user switched to by hand this week.
 fn early_plan(
     app: &AppHandle,
     host: &RealHost,
     snapshot: &Snapshot,
     settings: &settings::Settings,
     tool: &model::ToolView,
-    also_spent: &HashSet<String>,
 ) -> Option<duty::SwitchPlan> {
     if settings.use_first != duty::UseFirst::ResetsSoonest {
         return None;
@@ -670,8 +715,10 @@ fn early_plan(
     if activity::last_switch_at(&log).is_some_and(|last| at - last < duty::EARLY_QUIET) {
         return None;
     }
-    let mut spent = duty::early_spent(&log, tool, at);
-    spent.extend(also_spent.iter().cloned());
+    if duty::chosen_by_hand(&log, tool, at) {
+        return None;
+    }
+    let spent = duty::early_spent(&log, tool, at);
     duty::early_target(tool, settings.auto_switch_at, &spent, at)
 }
 
@@ -1032,6 +1079,8 @@ pub fn start_background(app: &AppHandle) {
         crate::cli::hold_presence();
         // What a sign-in left when the app or the computer stopped under it.
         pitstop_core::signin::sweep_leftovers();
+        // Web profiles of accounts that are gone.
+        crate::webwin::sweep(&handle);
         refresh(&handle);
         look_for_tools(&handle, true);
         refresh(&handle);

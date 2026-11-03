@@ -2,17 +2,19 @@
 //! account, each with a web profile of its own, so each stays signed in to
 //! its own account on the site. Signing in there is separate from the tool's
 //! login: the user does it once in each account's window, and the profile
-//! keeps it, in `~/.pitstop/web/<tool>/<account>`.
+//! keeps it: in `~/.pitstop/web/<tool>/<account>` on Windows and Linux (see
+//! [`web_profile`]), in a data store of the app's named by who the account
+//! is on macOS.
 //!
 //! The page is the site itself, so it gets nothing of the app: the window's
 //! capability covers `main` only, and Tauri refuses every command from a
 //! remote page no capability names. Links to anywhere but the site and the
 //! usual sign-in pages open in the default browser.
 
-use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use pitstop_core::{Host, ProviderId};
+use pitstop_core::state::AccountMeta;
+use pitstop_core::{web_profile, ProviderId};
 use tauri::webview::NewWindowResponse;
 use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_opener::OpenerExt;
@@ -77,14 +79,6 @@ pub fn label(provider: ProviderId, name: &str) -> String {
     format!("web:{}:{name}", provider.as_str())
 }
 
-/// Where an account's web profile is kept.
-pub fn profile_dir(home: &Path, provider: ProviderId, name: &str) -> PathBuf {
-    home.join(".pitstop")
-        .join("web")
-        .join(provider.as_str())
-        .join(name)
-}
-
 /// Whether `host` is `domain` or one of its subdomains.
 fn under(host: &str, domain: &str) -> bool {
     host == domain
@@ -110,16 +104,36 @@ pub fn stays_inside(site: &Site, url: &Url) -> bool {
     }
 }
 
+/// Whether the window hears of every frame's loads, not only the page's own.
+/// WebKit on macOS asks about each frame and the webview layer doesn't say
+/// which one asked; WebView2 on Windows, and WebKitGTK as used here, ask
+/// only about the page itself.
+const EVERY_FRAME: bool = cfg!(target_os = "macos");
+
+/// Whether the window may load `url`. Where only the page's own navigations
+/// are heard, one off the site goes to the browser. Where every frame's are
+/// (`every_frame`), that would tear a claude.ai artifact, a Cloudflare check
+/// or a payment form out of the page and into the browser, one tab each: so
+/// there every https load stays, and only new windows go out.
+pub fn may_load(site: &Site, url: &Url, every_frame: bool) -> bool {
+    if every_frame {
+        matches!(url.scheme(), "https" | "about" | "blob" | "data")
+    } else {
+        stays_inside(site, url)
+    }
+}
+
 /// The 16 bytes that name an account's web profile on macOS, the same on
-/// every run and version: two 64-bit FNV-1a hashes of the tool and the name.
+/// every run and version: two 64-bit FNV-1a hashes of the tool and
+/// [`web_profile::store_key`], which a rename doesn't change.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub fn store_id(provider: ProviderId, name: &str) -> [u8; 16] {
+pub fn store_id(provider: ProviderId, store_key: &str) -> [u8; 16] {
     fn fnv(seed: u64, bytes: &[u8]) -> u64 {
         bytes.iter().fold(seed, |hash, &b| {
             (hash ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3)
         })
     }
-    let key = format!("piaz-switch-web|{}|{name}", provider.as_str());
+    let key = format!("piaz-switch-web|{}|{store_key}", provider.as_str());
     let first = fnv(0xcbf2_9ce4_8422_2325, key.as_bytes());
     let second = fnv(first ^ 0x9e37_79b9_7f4a_7c15, key.as_bytes());
     let mut id = [0u8; 16];
@@ -177,17 +191,16 @@ pub fn open(app: &AppHandle, provider: ProviderId, name: &str) -> Result<Opened,
             format!("{} accounts have no web window.", provider.display_name()),
         )
     })?;
-    let known = app::engine()
-        .state()
-        .map_err(|e| UiError::from(&e))?
+    let state = app::engine().state().map_err(|e| UiError::from(&e))?;
+    let Some(account) = state
         .accounts
         .iter()
-        .any(|a| a.provider == provider && a.name == name);
-    if !known {
+        .find(|a| a.provider == provider && a.name == name)
+    else {
         return Err(UiError::from(&pitstop_core::Error::UnknownAccount(
             name.to_owned(),
         )));
-    }
+    };
     let label = label(provider, name);
     if let Some(window) = app.get_webview_window(&label) {
         let _ = window.unminimize();
@@ -209,7 +222,7 @@ pub fn open(app: &AppHandle, provider: ProviderId, name: &str) -> Result<Opened,
         .min_inner_size(520.0, 420.0)
         .center()
         .on_navigation(move |url| {
-            let inside = stays_inside(site, url);
+            let inside = may_load(site, url, EVERY_FRAME);
             if !inside {
                 to_browser(&leaving, url);
             }
@@ -226,10 +239,12 @@ pub fn open(app: &AppHandle, provider: ProviderId, name: &str) -> Result<Opened,
             }
         });
     #[cfg(target_os = "macos")]
-    let builder = builder.data_store_identifier(store_id(provider, name));
+    let builder =
+        builder.data_store_identifier(store_id(provider, &web_profile::store_key(account)));
     #[cfg(not(target_os = "macos"))]
     let builder = {
-        let dir = profile_dir(&app::host().home(), provider, name);
+        let _ = account;
+        let dir = web_profile::dir(&pitstop_core::Host::home(&app::host()), provider, name);
         std::fs::create_dir_all(&dir).map_err(|e| UiError::new("webWindow", e.to_string()))?;
         builder.data_directory(dir)
     };
@@ -255,47 +270,115 @@ fn close(app: &AppHandle, provider: ProviderId, name: &str) -> bool {
 }
 
 /// Try `work` a few times while a closed window's browser still holds the
-/// profile's files.
-fn retry(mut work: impl FnMut() -> std::io::Result<()>, waited: bool) {
+/// profile's files. Says whether it worked.
+fn retry<E>(mut work: impl FnMut() -> Result<(), E>, waited: bool) -> bool {
     let tries = if waited { 10 } else { 1 };
     for i in 0..tries {
         if work().is_ok() {
-            return;
+            return true;
         }
         if i + 1 < tries {
             std::thread::sleep(Duration::from_millis(300));
         }
     }
+    false
 }
 
-/// An account renamed: its window closes and its profile follows it to the
-/// new name. Where the profile can't be moved, the new name starts a fresh
-/// one and the user signs in again there.
-pub fn follow_rename(app: &AppHandle, provider: ProviderId, old: &str, new: &str) {
+/// Delete a data store of the app's on macOS, from any thread but the main
+/// one (the deletion runs there, and this waits for it).
+#[cfg(target_os = "macos")]
+fn remove_store(app: &AppHandle, id: [u8; 16]) -> bool {
+    tauri::async_runtime::block_on(app.remove_data_store(id)).is_ok()
+}
+
+/// An account renamed (`account` as it is now): its window closes and its
+/// profile follows it to the new name. On macOS the profile is named by who
+/// the account is, so it stays; where that isn't known it was named by the
+/// old name, and goes: the site asks to sign in again. Elsewhere a folder
+/// that can't be moved is left as an orphan, deleted at the next start, and
+/// the new name starts a fresh profile.
+pub fn follow_rename(app: &AppHandle, provider: ProviderId, old: &str, account: &AccountMeta) {
     if site(provider).is_none() {
         return;
     }
     let waited = close(app, provider, old);
-    let home = app::host().home();
-    let from = profile_dir(&home, provider, old);
-    let to = profile_dir(&home, provider, new);
-    if !from.exists() || to.exists() {
-        return;
+    #[cfg(target_os = "macos")]
+    {
+        let _ = waited;
+        if account.identity.is_none() {
+            let gone = AccountMeta {
+                name: old.to_owned(),
+                ..account.clone()
+            };
+            let id = store_id(provider, &web_profile::store_key(&gone));
+            retry(|| remove_store(app, id).then_some(()).ok_or(()), true);
+        }
     }
-    retry(|| std::fs::rename(&from, &to), waited);
+    #[cfg(not(target_os = "macos"))]
+    {
+        let home = pitstop_core::Host::home(&app::host());
+        retry(
+            || web_profile::rename(&home, provider, old, &account.name),
+            waited,
+        );
+    }
 }
 
-/// An account forgotten: its window closes and its profile goes.
-pub fn follow_forget(app: &AppHandle, provider: ProviderId, name: &str) {
+/// An account forgotten (`account` as it was): its window closes and its
+/// profile goes, with the site's sign-in in it. One whose files a closing
+/// window still holds is deleted at the next start, as an orphan.
+pub fn follow_forget(app: &AppHandle, provider: ProviderId, account: &AccountMeta) {
     if site(provider).is_none() {
         return;
     }
-    let waited = close(app, provider, name);
-    let dir = profile_dir(&app::host().home(), provider, name);
-    if !dir.exists() {
-        return;
+    let waited = close(app, provider, &account.name);
+    #[cfg(target_os = "macos")]
+    {
+        let id = store_id(provider, &web_profile::store_key(account));
+        retry(|| remove_store(app, id).then_some(()).ok_or(()), waited);
     }
-    retry(|| std::fs::remove_dir_all(&dir), waited);
+    #[cfg(not(target_os = "macos"))]
+    {
+        retry(
+            || {
+                web_profile::forget(
+                    &pitstop_core::Host::home(&app::host()),
+                    provider,
+                    &account.name,
+                )
+            },
+            waited,
+        );
+    }
+}
+
+/// At start, off the main thread: the profiles of accounts that no longer
+/// exist go (a forget whose window still held the files, an account removed
+/// on the command line). On macOS every data store of the app's is a web
+/// profile; one no account names goes.
+pub fn sweep(app: &AppHandle) {
+    let Ok(state) = app::engine().state() else {
+        return;
+    };
+    #[cfg(target_os = "macos")]
+    {
+        let keep: Vec<[u8; 16]> = state
+            .accounts
+            .iter()
+            .filter(|a| site(a.provider).is_some())
+            .map(|a| store_id(a.provider, &web_profile::store_key(a)))
+            .collect();
+        if let Ok(ids) = tauri::async_runtime::block_on(app.fetch_data_store_identifiers()) {
+            for id in ids.into_iter().filter(|id| !keep.contains(id)) {
+                remove_store(app, id);
+            }
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+        web_profile::sweep(&pitstop_core::Host::home(&app::host()), &state);
+    }
 }
 
 /// Open an account's window on its tool's site, or bring it forward. Says
@@ -339,18 +422,42 @@ mod tests {
 
     #[test]
     fn each_account_keeps_its_profile_in_its_own_folder() {
-        let home = Path::new("/home/ben");
+        let home = std::path::Path::new("/home/ben");
         assert_eq!(
-            profile_dir(home, ProviderId::ClaudeCode, "work"),
+            web_profile::dir(home, ProviderId::ClaudeCode, "work"),
             home.join(".pitstop")
                 .join("web")
                 .join("claude-code")
                 .join("work")
         );
         assert_ne!(
-            profile_dir(home, ProviderId::Codex, "work"),
-            profile_dir(home, ProviderId::ClaudeCode, "work")
+            web_profile::dir(home, ProviderId::Codex, "work"),
+            web_profile::dir(home, ProviderId::ClaudeCode, "work")
         );
+    }
+
+    #[test]
+    fn where_every_frame_is_heard_a_frame_in_the_page_stays_in_it() {
+        let claude = site(ProviderId::ClaudeCode).unwrap();
+        for frame in [
+            "https://www.claudeusercontent.com/artifact",
+            "https://challenges.cloudflare.com/turnstile",
+            "https://js.stripe.com/v3/",
+            "blob:https://claude.ai/1234",
+            "about:blank",
+        ] {
+            assert!(may_load(claude, &url(frame), true), "{frame}");
+        }
+        // Nothing but the web's own addresses, even so.
+        assert!(!may_load(
+            claude,
+            &url("mailto:support@anthropic.com"),
+            true
+        ));
+        assert!(!may_load(claude, &url("http://claude.ai/"), true));
+        // Where only the page's own navigations are heard, off the site goes out.
+        assert!(!may_load(claude, &url("https://js.stripe.com/v3/"), false));
+        assert!(may_load(claude, &url("https://claude.ai/new"), false));
     }
 
     #[test]
@@ -391,12 +498,13 @@ mod tests {
 
     #[test]
     fn a_macos_profile_id_is_stable_and_differs_per_account() {
-        let work = store_id(ProviderId::ClaudeCode, "work");
-        assert_eq!(work, store_id(ProviderId::ClaudeCode, "work"));
-        assert_ne!(work, store_id(ProviderId::ClaudeCode, "home"));
-        assert_ne!(work, store_id(ProviderId::Codex, "work"));
+        let work = store_id(ProviderId::ClaudeCode, "id|uuid-a:org-1");
+        assert_eq!(work, store_id(ProviderId::ClaudeCode, "id|uuid-a:org-1"));
+        assert_ne!(work, store_id(ProviderId::ClaudeCode, "id|uuid-b:org-1"));
+        assert_ne!(work, store_id(ProviderId::Codex, "id|uuid-a:org-1"));
         // Fixed, so a new version finds the profiles an old one made.
         let hex: String = work.iter().map(|b| format!("{b:02x}")).collect();
-        assert_eq!(hex, "f81019f3e3c6bcf48971e09d53e0dae0");
+        assert_eq!(hex.len(), 32);
+        assert_eq!(hex, "7c020bcc54454733fee50a05e4186cd6");
     }
 }

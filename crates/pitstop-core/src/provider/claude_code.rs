@@ -54,8 +54,15 @@ impl ClaudeCode {
             .unwrap_or_else(|| host.claude_token_in_keychain())
     }
 
+    /// The folder of the Claude Code whose login Piaz Switch switches: the
+    /// one in the home directory, whatever `CLAUDE_CONFIG_DIR` this process
+    /// was started with (a run pointed elsewhere keeps a login of its own).
+    pub fn config_dir(host: &dyn Host) -> PathBuf {
+        host.home().join(".claude")
+    }
+
     pub fn credentials_path(host: &dyn Host) -> PathBuf {
-        host.home().join(".claude").join(".credentials.json")
+        Self::config_dir(host).join(".credentials.json")
     }
 
     pub fn config_path(host: &dyn Host) -> PathBuf {
@@ -225,7 +232,9 @@ impl Provider for ClaudeCode {
         let mut config = as_object(read_config(host, &config_path)?)?;
         let obj = config.as_object_mut().expect("checked to be an object");
         if blob.oauth_account.is_null() {
-            obj.remove("oauthAccount");
+            // The keys after it keep their order (`remove` would move the
+            // last one into its place).
+            obj.shift_remove("oauthAccount");
         } else {
             obj.insert("oauthAccount".into(), blob.oauth_account);
         }

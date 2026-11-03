@@ -30,26 +30,87 @@ pub fn supported() -> bool {
     cfg!(any(windows, target_os = "macos"))
 }
 
-/// What Task Scheduler runs: the program, quoted, then [`SUBCOMMAND`].
+/// What the job runs, as one command line: the program, quoted, then
+/// [`SUBCOMMAND`]. For saying so; the job itself names them apart.
 pub fn task_run(program: &Path) -> String {
     format!("\"{}\" {SUBCOMMAND}", program.display())
 }
 
-pub fn schtasks_create(program: &Path) -> Vec<String> {
-    [
-        "/Create",
-        "/TN",
-        TASK_NAME,
-        "/TR",
-        &task_run(program),
-        "/SC",
-        "DAILY",
-        "/ST",
-        &format!("{AT_HOUR:02}:{AT_MINUTE:02}"),
-        "/F",
+/// The task, as Task Scheduler reads it from XML: the program with
+/// [`SUBCOMMAND`] each day at [`AT_HOUR`], for this user while signed in.
+/// Unlike a task made with `/SC DAILY`, it runs on battery and isn't stopped
+/// when the laptop unplugs, and one missed while the PC was asleep or off
+/// runs as soon as it can.
+pub fn task_xml(program: &Path) -> String {
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>Piaz Switch renews parked logins once a day while it is closed.</Description>
+  </RegistrationInfo>
+  <Triggers>
+    <CalendarTrigger>
+      <StartBoundary>2026-01-01T{AT_HOUR:02}:{AT_MINUTE:02}:00</StartBoundary>
+      <Enabled>true</Enabled>
+      <ScheduleByDay>
+        <DaysInterval>1</DaysInterval>
+      </ScheduleByDay>
+    </CalendarTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <ExecutionTimeLimit>PT10M</ExecutionTimeLimit>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>"{}"</Command>
+      <Arguments>{SUBCOMMAND}</Arguments>
+    </Exec>
+  </Actions>
+</Task>
+"#,
+        xml(&program.to_string_lossy())
+    )
+}
+
+/// The task XML as Task Scheduler takes it from a file: UTF-16, little
+/// endian, after a byte order mark.
+pub fn task_file(xml: &str) -> Vec<u8> {
+    let mut bytes = vec![0xFF, 0xFE];
+    for unit in xml.encode_utf16() {
+        bytes.extend_from_slice(&unit.to_le_bytes());
+    }
+    bytes
+}
+
+/// `schtasks` making the task from the XML in `file`, replacing ours.
+pub fn schtasks_create(file: &Path) -> Vec<String> {
+    vec![
+        "/Create".into(),
+        "/TN".into(),
+        TASK_NAME.into(),
+        "/XML".into(),
+        file.to_string_lossy().into_owned(),
+        "/F".into(),
     ]
-    .map(String::from)
-    .to_vec()
 }
 
 pub fn schtasks_query() -> Vec<String> {
@@ -72,6 +133,7 @@ fn xml(text: &str) -> String {
     text.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
 
 /// The LaunchAgent: the program with [`SUBCOMMAND`] at [`AT_HOUR`] each day.
@@ -172,7 +234,15 @@ pub fn installed(home: &Path) -> Result<bool> {
 /// ours already there.
 pub fn install(home: &Path, program: &Path) -> Result<()> {
     if cfg!(windows) {
-        return run("schtasks", &schtasks_create(program));
+        let file =
+            std::env::temp_dir().join(format!("piaz-switch-renew-task-{}.xml", std::process::id()));
+        std::fs::write(&file, task_file(&task_xml(program))).map_err(|source| Error::Io {
+            path: file.clone(),
+            source,
+        })?;
+        let made = run("schtasks", &schtasks_create(&file));
+        let _ = std::fs::remove_file(&file);
+        return made;
     }
     #[cfg(target_os = "macos")]
     {
@@ -311,19 +381,43 @@ mod tests {
     use crate::RealHost;
 
     #[test]
-    fn task_scheduler_runs_the_program_quoted_once_a_day() {
-        let program = Path::new(r"C:\Users\ben\AppData\Local\Piaz Switch\pitstop-app.exe");
-        let args = schtasks_create(program);
-        assert_eq!(args[..3], ["/Create", "/TN", TASK_NAME]);
-        let tr = args.iter().position(|a| a == "/TR").unwrap();
+    fn task_scheduler_runs_the_program_quoted_once_a_day_on_battery_too() {
+        let program = Path::new(r"C:\Users\ben\AppData\Local\Piaz Switch & Co\pitstop-app.exe");
+        let task = task_xml(program);
+        assert!(task.starts_with(r#"<?xml version="1.0" encoding="UTF-16"?>"#));
+        // The path, spaces and all, quoted once and escaped for XML.
+        assert!(task.contains(
+            r#"<Command>"C:\Users\ben\AppData\Local\Piaz Switch &amp; Co\pitstop-app.exe"</Command>"#
+        ));
+        assert!(task.contains("<Arguments>renew</Arguments>"));
+        assert!(task.contains("<StartBoundary>2026-01-01T13:00:00</StartBoundary>"));
+        assert!(task.contains("<DaysInterval>1</DaysInterval>"));
+        for setting in [
+            "<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>",
+            "<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>",
+            "<StartWhenAvailable>true</StartWhenAvailable>",
+            "<LogonType>InteractiveToken</LogonType>",
+            "<RunLevel>LeastPrivilege</RunLevel>",
+        ] {
+            assert!(task.contains(setting), "{setting}");
+        }
+        assert!(!task.contains("<UserId>"));
+        // A file in UTF-16 with its byte order mark.
+        let file = task_file("<a/>");
+        assert_eq!(file, [0xFF, 0xFE, b'<', 0, b'a', 0, b'/', 0, b'>', 0]);
+
+        let args = schtasks_create(Path::new(r"C:\Users\ben\AppData\Local\Temp\task one.xml"));
         assert_eq!(
-            args[tr + 1],
-            r#""C:\Users\ben\AppData\Local\Piaz Switch\pitstop-app.exe" renew"#
+            args,
+            [
+                "/Create",
+                "/TN",
+                TASK_NAME,
+                "/XML",
+                r"C:\Users\ben\AppData\Local\Temp\task one.xml",
+                "/F"
+            ]
         );
-        let sc = args.iter().position(|a| a == "/SC").unwrap();
-        assert_eq!(args[sc + 1], "DAILY");
-        assert_eq!(args[sc + 3], "13:00");
-        assert_eq!(args.last().unwrap(), "/F");
         assert_eq!(schtasks_query(), ["/Query", "/TN", TASK_NAME]);
         assert_eq!(schtasks_delete(), ["/Delete", "/TN", TASK_NAME, "/F"]);
     }

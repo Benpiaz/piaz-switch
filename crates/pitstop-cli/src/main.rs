@@ -7,7 +7,7 @@ use pitstop_core::doctor::{self, Level};
 use pitstop_core::engine::{AccountUsage, RemoveOutcome, SwitchOutcome};
 use pitstop_core::live::Live;
 use pitstop_core::usage::Http;
-use pitstop_core::{signin, Engine, ProviderId, RealHost, State};
+use pitstop_core::{signin, Engine, Host, ProviderId, RealHost, State};
 
 /// Park and switch Claude Code, Codex, Cursor and Antigravity accounts without signing out.
 #[derive(Parser)]
@@ -509,6 +509,14 @@ fn main() {
                 }
                 record(&host, entry, &renamed);
                 let meta = renamed?;
+                // Its web window's profile follows; one the open app's window
+                // holds stays behind and goes the next time the app starts.
+                let _ = pitstop_core::web_profile::rename(
+                    &host.home(),
+                    meta.provider,
+                    &name,
+                    &meta.name,
+                );
                 println!(
                     "Renamed `{name}` to `{new_name}` ({}).",
                     meta.label.as_deref().unwrap_or("no email found")
@@ -523,6 +531,10 @@ fn main() {
                     entry = entry.provider(p);
                 }
                 record(&host, entry, &removed);
+                if let (Ok(_), Some(p)) = (&removed, tool) {
+                    // As on a rename, a profile still held goes at the app's next start.
+                    let _ = pitstop_core::web_profile::forget(&host.home(), p, &name);
+                }
                 match removed? {
                     RemoveOutcome::Removed => println!("Removed `{name}`."),
                     RemoveOutcome::RemovedActive => println!(

@@ -99,19 +99,29 @@ static SHOWN: std::sync::Mutex<Option<Look>> = std::sync::Mutex::new(None);
 
 #[cfg(not(target_os = "macos"))]
 fn show_look(tray: &tauri::tray::TrayIcon, look: Look) {
-    let Ok(mut shown) = SHOWN.lock() else {
-        return;
-    };
-    if *shown == Some(look) {
-        return;
+    // Decided under the lock, set without it: setting the icon waits for the
+    // main thread, which may be refreshing the tray itself.
+    {
+        let Ok(mut shown) = SHOWN.lock() else {
+            return;
+        };
+        if *shown == Some(look) {
+            return;
+        }
+        *shown = Some(look);
     }
     let base = icon();
     let drawn = tray_look::draw(base.rgba(), base.width(), base.height(), look);
     if tray
         .set_icon(Some(Image::new_owned(drawn, base.width(), base.height())))
-        .is_ok()
+        .is_err()
     {
-        *shown = Some(look);
+        // Drawn again next time, unless another look came meanwhile.
+        if let Ok(mut shown) = SHOWN.lock() {
+            if *shown == Some(look) {
+                *shown = None;
+            }
+        }
     }
 }
 

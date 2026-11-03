@@ -1946,6 +1946,8 @@ function onOpenDialog(request) {
   if (request.serial) {
     if (request.serial <= openedSerial) return;
     openedSerial = request.serial;
+    // Heard as an event: no longer pending for a reload to open again.
+    invoke("dialog_opened", { serial: request.serial }).catch(() => {});
   }
   if (request.kind === "add") openAdd(request.provider || undefined);
   else if (request.kind === "name" && request.provider) openName(request.provider);

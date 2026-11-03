@@ -38,6 +38,12 @@
   **Sign in again**. The run-out notice gets a **Switch to …** button and the
   automatic switch's notice a **Switch back** button. A click on a notification opens
   Piaz Switch, and what was notified isn't posted again after a restart.
+- **A switch you make stays made.** After **Switch back**, or any switch of your own
+  (window, tray, Jump List, notification), the automatic switch no longer moves
+  Claude Code away from that account for a limit it was already at the share of
+  when you chose it, until that limit resets; a limit that reaches the share later
+  still switches. With **Week that resets first**, no switch before the share takes
+  Claude Code away from an account you chose that week.
 - **A tray icon that shows how much is left, a Jump List and a welcome.** On Windows
   the tray icon carries a bar under the mark: full while the account in use has used
   under 70% of its fullest limit, half from 70%, a sliver from 90%, and a badge when
@@ -53,8 +59,12 @@
   does the same for the account in use. Each window keeps a web profile of its own,
   so it stays signed in to that account on the site (sign in once there; on macOS
   this needs macOS 14 or later, older versions open the site in your browser). The
-  page can't reach Piaz Switch, links elsewhere open in your browser, and renaming or
-  forgetting the account moves or deletes its profile.
+  page can't reach Piaz Switch and links elsewhere open in your browser (on macOS,
+  where the window can't tell a frame from the page, only new windows do). Renaming
+  the account keeps its web sign-in (on macOS when Piaz Switch knows who the account
+  is; otherwise the site asks you to sign in again); forgetting it deletes its web
+  profile, and one a closing window still held is deleted the next time Piaz Switch
+  starts. `piaz-switch rename` and `remove` do the same for the profile folders.
 - **Claude Code status line** (Settings → Command line): **Status line in Claude
   Code** adds a line under every Claude Code session with each account's 5-hour and
   weekly use, the one in use first with its pace (▲ ahead, ▼ behind), read from what
@@ -63,8 +73,9 @@
   **Remove** takes out only ours; `piaz-switch statusline` prints the same.
 - **Keep saved sign-ins fresh** (Settings → Command line): Task Scheduler (Windows)
   or a LaunchAgent (macOS) renews parked Claude Code logins once a day while Piaz
-  Switch is closed, so one left alone for weeks doesn't expire; it never runs
-  alongside the open app. `piaz-switch renew` and
+  Switch is closed, so one left alone for weeks doesn't expire; on Windows it also
+  runs on battery and catches up once the PC wakes. It never runs alongside the open
+  app (a status line run in a Claude Code session doesn't count as the app). `piaz-switch renew` and
   `piaz-switch schedule install|uninstall|status` do the same from the command line.
 
 ## [0.5.5] - 2026-11-03

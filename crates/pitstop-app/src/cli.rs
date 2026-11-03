@@ -146,8 +146,13 @@ pub fn cache_of(read_at: Option<i64>, tools: &[ToolView]) -> Cache {
 /// What was last written, so an unchanged snapshot writes nothing.
 static WRITTEN: Mutex<Vec<u8>> = Mutex::new(Vec::new());
 
-/// Keep `snapshot`'s usage for the status line, when it changed.
+/// Keep `snapshot`'s usage for the status line, when it changed. Before the
+/// first read of this run there is nothing new to keep: what the last run
+/// kept stays, rather than every account turning unread.
 pub fn keep_usage(snapshot: &Snapshot) {
+    if snapshot.updated_at.is_none() {
+        return;
+    }
     let cache = cache_of(snapshot.updated_at, &snapshot.tools);
     let bytes = usage_cache::to_bytes(&cache);
     let mut written = WRITTEN.lock().unwrap_or_else(|e| e.into_inner());

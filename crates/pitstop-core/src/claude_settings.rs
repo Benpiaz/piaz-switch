@@ -7,13 +7,28 @@ use std::path::{Path, PathBuf};
 use serde_json::{Map, Value};
 
 use crate::error::{Error, Result};
+use crate::provider::claude_code::ClaudeCode;
 use crate::Host;
 
 /// The subcommand Claude Code runs.
 pub const SUBCOMMAND: &str = "statusline";
 
+/// The settings of the Claude Code whose login Piaz Switch switches, in the
+/// folder its login is in ([`ClaudeCode::config_dir`]).
 pub fn path(host: &dyn Host) -> PathBuf {
-    host.home().join(".claude").join("settings.json")
+    ClaudeCode::config_dir(host).join("settings.json")
+}
+
+/// Where a write to `path` lands: the file a symbolic link there points at
+/// (as a dotfiles setup links it), so the link stays a link. A link to
+/// nowhere is written over like a file.
+pub fn write_target(path: &Path) -> PathBuf {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+        }
+        _ => path.to_path_buf(),
+    }
 }
 
 /// What Claude Code's settings hold for its status line.
@@ -129,7 +144,8 @@ pub fn without_status_line(bytes: Option<&[u8]>) -> Result<Option<Vec<u8>>> {
         StatusLine::Absent | StatusLine::Other(_) => return Ok(None),
     }
     let mut settings = parse(bytes).map_err(|()| refused("they aren't valid JSON"))?;
-    settings.remove("statusLine");
+    // `remove` would move the last setting into its place.
+    settings.shift_remove("statusLine");
     Ok(Some(written(&settings)))
 }
 
@@ -142,14 +158,14 @@ pub fn read(host: &dyn Host) -> StatusLine {
 }
 
 pub fn add(host: &dyn Host, command: &str) -> Result<()> {
-    let path = path(host);
+    let path = write_target(&path(host));
     let bytes = host.read(&path)?;
     let new = with_status_line(bytes.as_deref(), command)?;
     host.write_atomic(&path, &new)
 }
 
 pub fn remove(host: &dyn Host) -> Result<()> {
-    let path = path(host);
+    let path = write_target(&path(host));
     let bytes = host.read(&path)?;
     match without_status_line(bytes.as_deref())? {
         Some(new) => host.write_atomic(&path, &new),
@@ -217,6 +233,49 @@ mod tests {
         let removed = without_status_line(Some(&updated)).unwrap().unwrap();
         assert_eq!(keys(&removed), ["model", "env"]);
         assert_eq!(without_status_line(Some(&removed)).unwrap(), None);
+    }
+
+    #[test]
+    fn removing_our_line_keeps_the_order_of_everything_after_it() {
+        let before = br#"{"model":"opus","statusLine":{"type":"command","command":"/a/piaz-switch statusline"},"env":{},"hooks":{},"theme":"dark"}"#;
+        let removed = without_status_line(Some(before)).unwrap().unwrap();
+        assert_eq!(keys(&removed), ["model", "env", "hooks", "theme"]);
+    }
+
+    #[test]
+    fn a_settings_file_linked_from_elsewhere_is_written_where_it_lives() {
+        use crate::RealHost;
+        let home = tempfile::tempdir().unwrap();
+        let dotfiles = home.path().join("dotfiles");
+        std::fs::create_dir_all(&dotfiles).unwrap();
+        let real = dotfiles.join("claude-settings.json");
+        std::fs::write(&real, br#"{"theme":"dark"}"#).unwrap();
+        let host = RealHost::with_home(home.path().to_path_buf());
+        let link = path(&host);
+        std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+        #[cfg(unix)]
+        let linked = std::os::unix::fs::symlink(&real, &link);
+        #[cfg(windows)]
+        let linked = std::os::windows::fs::symlink_file(&real, &link);
+        // Windows lets only some accounts make links: nothing to try then.
+        if linked.is_err() {
+            return;
+        }
+        add(&host, OURS).unwrap();
+        assert!(std::fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(
+            status_line(Some(&std::fs::read(&real).unwrap())),
+            StatusLine::Ours(OURS.into())
+        );
+        remove(&host).unwrap();
+        assert!(std::fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(keys(&std::fs::read(&real).unwrap()), ["theme"]);
     }
 
     #[test]

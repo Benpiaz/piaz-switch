@@ -528,11 +528,66 @@ pub fn switch_target(
     order: UseFirst,
     now: i64,
 ) -> Option<SwitchPlan> {
+    switch_target_holding(tool, threshold, order, &HashSet::new(), now)
+}
+
+/// Names a limit of `account` until it resets, as [`SwitchPlan::key`] does
+/// for a switch away from it.
+pub fn limit_key(provider: &str, account: &str, label: &str, resets_at: Option<i64>) -> String {
+    format!("{provider}|{account}|{label}|{}", resets_at.unwrap_or(0))
+}
+
+/// What the notices' record keeps a held limit's [`limit_key`] under.
+pub const HELD: &str = "held|";
+
+/// A limit an account was at the threshold of when the user switched to it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeldLimit {
+    /// By [`limit_key`].
+    pub key: String,
+    pub label: String,
+    pub resets_at: Option<i64>,
+}
+
+/// The limits of `account` at or over `threshold` now: what a switch by hand
+/// to it holds the automatic switch off, until each resets. The user chose
+/// the account knowing them; a limit that reaches the threshold only later
+/// still switches.
+pub fn held_limits(
+    provider: &str,
+    account: &AccountView,
+    threshold: u8,
+    now: i64,
+) -> Vec<HeldLimit> {
+    let threshold = f64::from(threshold);
+    windows_of(account)
+        .into_iter()
+        .flatten()
+        .filter(|w| used_now(w, now) >= threshold)
+        .map(|w| HeldLimit {
+            key: limit_key(provider, &account.name, &w.label, w.resets_at),
+            label: w.label.clone(),
+            resets_at: w.resets_at,
+        })
+        .collect()
+}
+
+/// [`switch_target`] leaving out the limits in `held` (by [`limit_key`]):
+/// those of an account the user switched to by hand while they were already
+/// at the threshold.
+pub fn switch_target_holding(
+    tool: &ToolView,
+    threshold: u8,
+    order: UseFirst,
+    held: &HashSet<String>,
+    now: i64,
+) -> Option<SwitchPlan> {
     let threshold = f64::from(threshold);
     let active = tool.accounts.iter().find(|a| a.in_use)?;
     let full = windows_of(active)?
         .iter()
         .filter(|w| used_now(w, now) >= threshold)
+        .filter(|w| !held.contains(&limit_key(tool.id, &active.name, &w.label, w.resets_at)))
         .max_by(|x, y| used_now(x, now).total_cmp(&used_now(y, now)))?;
     let to = first(
         tool.accounts
@@ -666,6 +721,22 @@ pub fn early_spent(
     spent
 }
 
+/// Whether the account in use was last switched to by hand, in its current
+/// week (its last five hours without a weekly limit): then no switch before
+/// the threshold takes Claude Code away from it. A switch the app made
+/// since, at the threshold, ends that. `log` is newest first.
+pub fn chosen_by_hand(log: &[pitstop_core::activity::Entry], tool: &ToolView, now: i64) -> bool {
+    use pitstop_core::activity::verb;
+    let Some(active) = tool.accounts.iter().find(|a| a.in_use) else {
+        return false;
+    };
+    let since = week_resets(active, now).map_or(now - PERIOD, |at| at - WEEK);
+    log.iter()
+        .filter(|e| e.at >= since && e.worked() && e.provider.as_deref() == Some(tool.id))
+        .find(|e| e.verb == verb::USE || e.verb == verb::AUTO_SWITCH)
+        .is_some_and(|e| e.verb == verb::USE && e.account.as_deref() == Some(active.name.as_str()))
+}
+
 fn windows_of(account: &AccountView) -> Option<&[WindowView]> {
     match &account.usage {
         Some(UsageView::Ok { windows }) => Some(windows),
@@ -739,11 +810,14 @@ pub struct NearNotice {
 /// The near-limit notices due: for each tool whose account in use has a
 /// limit at `threshold` or more, unless it is Claude Code and `claude_auto`
 /// (the automatic switch handles it). Claude Code's offer follows `order`,
-/// the other tools' the most room. A limit used up that the run-out notice
-/// already covers (`run_out_too`, and an account has room) is left to it.
-/// `sent` holds the keys already notified.
+/// the other tools' the most room. A used-up limit names the account the
+/// run-out offer (`suggestions`) names, so the two never disagree, and is
+/// left to the run-out notice when that one is on (`run_out_too`) and has
+/// an account to offer. `sent` holds the keys already notified.
+#[allow(clippy::too_many_arguments)]
 pub fn near_notices(
     tools: &[ToolView],
+    suggestions: &[Suggestion],
     threshold: u8,
     order: UseFirst,
     claude_auto: bool,
@@ -766,7 +840,14 @@ pub fn near_notices(
                 .max_by(|x, y| used_now(x, now).total_cmp(&used_now(y, now)))?;
             let percent = used_now(full, now);
             let order = if claude { order } else { UseFirst::MostLeft };
-            let to = switch_target(tool, threshold, order, now).map(|plan| plan.to);
+            let to = if percent >= 100.0 {
+                suggestions
+                    .iter()
+                    .find(|s| s.provider == tool.id && s.from == active.name)
+                    .map(|s| s.to.clone())
+            } else {
+                switch_target(tool, threshold, order, now).map(|plan| plan.to)
+            };
             if run_out_too && percent >= 100.0 && to.is_some() {
                 return None;
             }
@@ -797,16 +878,11 @@ pub fn near_key(provider: &str, from: &str, window: &str, resets_at: Option<i64>
     format!("near|{provider}|{from}|{window}|{}", resets_at.unwrap_or(0))
 }
 
-/// Names a "resets first" notice: one per account and week, keeping the
-/// [`early_key`] it was posted for after the `first|`.
+/// Names a "resets first" notice: one per account and week. Only the
+/// account that comes first is offered; one already offered isn't again,
+/// and the next one isn't offered in its place.
 pub fn resets_first_key(to: &str, to_resets: Option<i64>) -> String {
     format!("first|{}", early_key(to, to_resets))
-}
-
-/// The [`early_key`]s of the accounts a "resets first" notice was posted for.
-pub fn resets_first_spent<'a>(keys: impl Iterator<Item = &'a String>) -> HashSet<String> {
-    keys.filter_map(|k| k.strip_prefix("first|").map(str::to_owned))
-        .collect()
 }
 
 /// Names a "sign-in no longer works" notice for an account.
@@ -1345,6 +1421,7 @@ mod tests {
         )];
         let due = near_notices(
             &tools,
+            &[],
             90,
             UseFirst::MostLeft,
             false,
@@ -1364,10 +1441,13 @@ mod tests {
         );
         assert_eq!(due[0].resets_at, Some(NOW + 600));
         let sent: HashSet<String> = [due[0].key.clone()].into();
-        assert!(near_notices(&tools, 90, UseFirst::MostLeft, false, true, &sent, NOW).is_empty());
+        assert!(
+            near_notices(&tools, &[], 90, UseFirst::MostLeft, false, true, &sent, NOW).is_empty()
+        );
         // Below the share, nothing.
         assert!(near_notices(
             &tools,
+            &[],
             95,
             UseFirst::MostLeft,
             false,
@@ -1407,10 +1487,21 @@ mod tests {
             ),
         ])];
         let none = HashSet::new();
-        assert!(near_notices(&tools, 90, UseFirst::MostLeft, true, true, &none, NOW).is_empty());
-        let most = near_notices(&tools, 90, UseFirst::MostLeft, false, true, &none, NOW);
+        assert!(
+            near_notices(&tools, &[], 90, UseFirst::MostLeft, true, true, &none, NOW).is_empty()
+        );
+        let most = near_notices(&tools, &[], 90, UseFirst::MostLeft, false, true, &none, NOW);
         assert_eq!(most[0].to.as_deref(), Some("ben2"));
-        let soonest = near_notices(&tools, 90, UseFirst::ResetsSoonest, false, true, &none, NOW);
+        let soonest = near_notices(
+            &tools,
+            &[],
+            90,
+            UseFirst::ResetsSoonest,
+            false,
+            true,
+            &none,
+            NOW,
+        );
         assert_eq!(soonest[0].to.as_deref(), Some("ben3"));
     }
 
@@ -1424,13 +1515,35 @@ mod tests {
             ],
         )];
         let none = HashSet::new();
-        assert!(
-            near_notices(&with_room, 90, UseFirst::MostLeft, false, true, &none, NOW).is_empty()
+        let offer = [Suggestion {
+            provider: "codex",
+            from: "main".into(),
+            to: "team".into(),
+            window: "5h".into(),
+        }];
+        assert!(near_notices(
+            &with_room,
+            &offer,
+            90,
+            UseFirst::MostLeft,
+            false,
+            true,
+            &none,
+            NOW
+        )
+        .is_empty());
+        let due = near_notices(
+            &with_room,
+            &offer,
+            90,
+            UseFirst::MostLeft,
+            false,
+            false,
+            &none,
+            NOW,
         );
-        assert_eq!(
-            near_notices(&with_room, 90, UseFirst::MostLeft, false, false, &none, NOW).len(),
-            1
-        );
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].to.as_deref(), Some("team"));
         let nobody = vec![tool_of(
             "codex",
             vec![
@@ -1438,9 +1551,62 @@ mod tests {
                 account("team", false, ok(vec![window("5h", 97.0, None)])),
             ],
         )];
-        let due = near_notices(&nobody, 90, UseFirst::MostLeft, false, true, &none, NOW);
+        let due = near_notices(
+            &nobody,
+            &[],
+            90,
+            UseFirst::MostLeft,
+            false,
+            true,
+            &none,
+            NOW,
+        );
         assert_eq!(due.len(), 1);
         assert_eq!(due[0].to, None);
+    }
+
+    #[test]
+    fn a_used_up_limit_names_the_run_out_offer_never_another_verdict() {
+        // At 100% with the share at 90: the run-out offer names ben2 (95%,
+        // under 100); the share's own rule would find nobody.
+        let tools = vec![tool_of(
+            "codex",
+            vec![
+                account("ben1", true, ok(vec![window("5h", 100.0, Some(600))])),
+                account("ben2", false, ok(vec![window("5h", 95.0, None)])),
+            ],
+        )];
+        let offer = [Suggestion {
+            provider: "codex",
+            from: "ben1".into(),
+            to: "ben2".into(),
+            window: "5h".into(),
+        }];
+        let none = HashSet::new();
+        // The run-out notice says it: no second, contradicting notice.
+        assert!(near_notices(
+            &tools,
+            &offer,
+            90,
+            UseFirst::MostLeft,
+            false,
+            true,
+            &none,
+            NOW
+        )
+        .is_empty());
+        // Without the run-out notice, this one names the same account.
+        let due = near_notices(
+            &tools,
+            &offer,
+            90,
+            UseFirst::MostLeft,
+            false,
+            false,
+            &none,
+            NOW,
+        );
+        assert_eq!(due[0].to.as_deref(), Some("ben2"));
     }
 
     #[test]
@@ -1454,13 +1620,15 @@ mod tests {
     }
 
     #[test]
-    fn resets_first_notices_count_as_spent_for_their_week() {
-        let keys = [
+    fn a_resets_first_notice_is_named_by_its_account_and_week() {
+        assert_eq!(
             resets_first_key("ben3", Some(NOW + 86_400)),
-            near_key("codex", "main", "5h", Some(NOW)),
-        ];
-        let spent = resets_first_spent(keys.iter());
-        assert_eq!(spent, [early_key("ben3", Some(NOW + 86_400))].into());
+            format!("first|{}", early_key("ben3", Some(NOW + 86_400)))
+        );
+        assert_ne!(
+            resets_first_key("ben3", Some(NOW + 86_400)),
+            resets_first_key("ben3", Some(NOW + 8 * 86_400))
+        );
     }
 
     #[test]
@@ -1856,6 +2024,107 @@ mod tests {
             weekly("ben2", false, 0.0, 10.0, 86_400 - 30),
         ]);
         assert_eq!(early_target(&tie, 90, &HashSet::new(), NOW), None);
+    }
+
+    #[test]
+    fn a_limit_held_by_a_switch_by_hand_doesnt_switch_but_a_new_one_does() {
+        // The user switched back to ben1 at 92% of its five hours.
+        let tool = claude(vec![
+            account(
+                "ben1",
+                true,
+                ok(vec![
+                    window("5h", 92.0, Some(600)),
+                    window("week", 40.0, Some(5 * 86_400)),
+                ]),
+            ),
+            account("ben2", false, ok(vec![window("5h", 10.0, None)])),
+        ]);
+        let ben1 = &tool.accounts[0];
+        let held: HashSet<String> = held_limits("claude-code", ben1, 90, NOW)
+            .into_iter()
+            .map(|limit| {
+                assert_eq!(
+                    (limit.label.as_str(), limit.resets_at),
+                    ("5h", Some(NOW + 600))
+                );
+                limit.key
+            })
+            .collect();
+        assert_eq!(
+            held,
+            [limit_key("claude-code", "ben1", "5h", Some(NOW + 600))].into()
+        );
+        assert_eq!(
+            switch_target_holding(&tool, 90, UseFirst::MostLeft, &held, NOW),
+            None
+        );
+        // The held key is the plan's own: no try is spent on it either.
+        let plan = switch_target(&tool, 90, UseFirst::MostLeft, NOW).unwrap();
+        assert!(held.contains(&plan.key("claude-code")));
+
+        // Later its week reaches the share too: that one still switches.
+        let later = claude(vec![
+            account(
+                "ben1",
+                true,
+                ok(vec![
+                    window("5h", 95.0, Some(600)),
+                    window("week", 91.0, Some(5 * 86_400)),
+                ]),
+            ),
+            account("ben2", false, ok(vec![window("5h", 10.0, None)])),
+        ]);
+        let plan = switch_target_holding(&later, 90, UseFirst::MostLeft, &held, NOW).unwrap();
+        assert_eq!((plan.to.as_str(), plan.limit.as_str()), ("ben2", "week"));
+        // Once the five hours reset, the held key names a past period.
+        let reset = claude(vec![
+            account("ben1", true, ok(vec![window("5h", 93.0, Some(18_600))])),
+            account("ben2", false, ok(vec![window("5h", 10.0, None)])),
+        ]);
+        assert!(switch_target_holding(&reset, 90, UseFirst::MostLeft, &held, NOW).is_some());
+    }
+
+    #[test]
+    fn an_account_chosen_by_hand_isnt_left_before_the_threshold_this_week() {
+        use pitstop_core::activity::verb;
+        let tool = claude(vec![
+            weekly("ben1", true, 40.0, 30.0, 5 * 86_400),
+            weekly("ben3", false, 0.0, 10.0, 2 * 86_400),
+        ]);
+        // Newest first. The user switched to ben1 an hour ago.
+        let by_hand = vec![logged(NOW - 3600, verb::USE, "ben1", "ben3", None)];
+        assert!(chosen_by_hand(&by_hand, &tool, NOW));
+        // The app's own switch to it doesn't count.
+        let by_app = vec![logged(
+            NOW - 3600,
+            verb::AUTO_SWITCH,
+            "ben1",
+            "ben3",
+            Some("limit|5h|91"),
+        )];
+        assert!(!chosen_by_hand(&by_app, &tool, NOW));
+        // Nor a switch by hand from its last week.
+        let last_week = vec![logged(NOW - 3 * 86_400, verb::USE, "ben1", "ben3", None)];
+        assert!(!chosen_by_hand(&last_week, &tool, NOW));
+        // Nor one that a later switch by the app, at the threshold, followed.
+        let then_app = vec![
+            logged(
+                NOW - 60,
+                verb::AUTO_SWITCH,
+                "ben1",
+                "ben3",
+                Some("limit|5h|92"),
+            ),
+            logged(NOW - 3600, verb::USE, "ben3", "ben1", None),
+        ];
+        assert!(!chosen_by_hand(&then_app, &tool, NOW));
+        // A failed switch says nothing.
+        let failed = vec![
+            logged(NOW - 60, verb::USE, "ben3", "ben1", None).result("vaultCorrupt"),
+            logged(NOW - 3600, verb::USE, "ben1", "ben3", None),
+        ];
+        assert!(chosen_by_hand(&failed, &tool, NOW));
     }
 
     #[test]

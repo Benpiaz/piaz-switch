@@ -99,7 +99,10 @@ pub fn tasks(snapshot: &Snapshot, lang: Lang) -> Vec<JumpTask> {
 }
 
 /// The tasks last written, so the list is written only when they change.
+/// Never held while the list is written.
 static WRITTEN: Mutex<Option<Vec<JumpTask>>> = Mutex::new(None);
+/// One writer of the list at a time; only writers' own threads take it.
+static WRITING: Mutex<()> = Mutex::new(());
 
 /// Write the Jump List again if the accounts (or the language) changed since
 /// it was last written. Off the calling thread; nothing on macOS, and nothing
@@ -120,17 +123,21 @@ pub fn update(app: &AppHandle, snapshot: &Snapshot, lang: Lang) {
     let app_id = app.config().identifier.clone();
     std::thread::spawn(move || {
         // One writer at a time; a newer list may have been written meanwhile.
-        let Ok(mut written) = WRITTEN.lock() else {
-            return;
-        };
-        if written.as_ref() == Some(&tasks) {
+        let _one = WRITING.lock().unwrap_or_else(|e| e.into_inner());
+        if WRITTEN
+            .lock()
+            .map(|w| w.as_ref() == Some(&tasks))
+            .unwrap_or(true)
+        {
             return;
         }
         let Ok(exe) = std::env::current_exe() else {
             return;
         };
         if write(&app_id, &exe, &tasks).is_ok() {
-            *written = Some(tasks);
+            if let Ok(mut written) = WRITTEN.lock() {
+                *written = Some(tasks);
+            }
         }
     });
 }
@@ -262,6 +269,21 @@ pub fn ask_window(app: &AppHandle, mut request: serde_json::Value) {
 #[tauri::command]
 pub fn take_pending_dialog() -> Option<serde_json::Value> {
     PENDING.lock().ok()?.take()
+}
+
+/// The window opened the dialog numbered `serial`, as it heard of it: it is
+/// no longer pending, so a reload of the page doesn't open it again.
+#[tauri::command]
+pub fn dialog_opened(serial: u64) {
+    if let Ok(mut pending) = PENDING.lock() {
+        let done = pending
+            .as_ref()
+            .and_then(|p| p["serial"].as_u64())
+            .is_some_and(|waiting| waiting <= serial);
+        if done {
+            *pending = None;
+        }
+    }
 }
 
 /// Do what a Jump List task asks. A switch opens no window: it asks only when

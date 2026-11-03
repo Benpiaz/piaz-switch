@@ -6,6 +6,7 @@
 //! read, and two renewers of one login would race on its refresh token,
 //! which each renewal replaces.
 
+use std::collections::HashSet;
 use std::fs::{File, OpenOptions, TryLockError};
 use std::path::{Path, PathBuf};
 
@@ -64,37 +65,61 @@ fn app_program(name: &str) -> bool {
         || (name.starts_with("piaz switch") && name.ends_with(".exe"))
 }
 
-/// Whether Windows' `tasklist /FO CSV /NH` lists the app's program running
-/// under a process other than `me`.
-pub fn app_in_tasklist(csv: &str, me: u32) -> bool {
-    csv.lines().any(|line| {
-        let mut fields = line.split("\",\"").map(|f| f.trim_matches('"'));
-        let (Some(image), Some(pid)) = (fields.next(), fields.next()) else {
-            return false;
-        };
-        app_program(image) && pid.trim().parse::<u32>().is_ok_and(|pid| pid != me)
-    })
+/// The processes other than `me` that Windows' `tasklist /FO CSV /NH`
+/// lists running the app's program.
+pub fn app_in_tasklist(csv: &str, me: u32) -> HashSet<u32> {
+    csv.lines()
+        .filter_map(|line| {
+            let mut fields = line.split("\",\"").map(|f| f.trim_matches('"'));
+            let (image, pid) = (fields.next()?, fields.next()?);
+            let pid = pid.trim().parse::<u32>().ok()?;
+            (app_program(image) && pid != me).then_some(pid)
+        })
+        .collect()
 }
 
-/// Whether `ps -axo pid=,comm=` (macOS) lists the app's program running
-/// under a process other than `me`.
-pub fn app_in_ps(listing: &str, me: u32) -> bool {
-    listing.lines().any(|line| {
-        let line = line.trim_start();
-        let Some((pid, program)) = line.split_once(char::is_whitespace) else {
-            return false;
-        };
-        let program = program.trim();
-        let ours = program.contains("/Piaz Switch.app/Contents/MacOS/") || app_program(program);
-        ours && pid.parse::<u32>().is_ok_and(|pid| pid != me)
-    })
+/// The processes other than `me` that `ps -axo pid=,comm=` (macOS) lists
+/// running the app's program.
+pub fn app_in_ps(listing: &str, me: u32) -> HashSet<u32> {
+    listing
+        .lines()
+        .filter_map(|line| {
+            let (pid, program) = line.trim_start().split_once(char::is_whitespace)?;
+            let program = program.trim();
+            let ours = program.contains("/Piaz Switch.app/Contents/MacOS/") || app_program(program);
+            let pid = pid.parse::<u32>().ok()?;
+            (ours && pid != me).then_some(pid)
+        })
+        .collect()
+}
+
+/// How long a look waits before looking again: the app's program also runs
+/// for a moment as Claude Code's status line, and that run is gone by then.
+pub const LOOK_AGAIN_AFTER: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Whether the app runs, from two looks at its program's processes a moment
+/// apart: only one there both times counts. A status line run, over in a
+/// fraction of a second, doesn't.
+pub fn still_running(first: &HashSet<u32>, second: &HashSet<u32>) -> bool {
+    first.intersection(second).next().is_some()
 }
 
 /// Whether the app's program runs in another process, by name: what tells
 /// apart a version of the app from before the lock, which holds none. The
 /// renewal running as the app's own program (`pitstop-app renew`) is this
-/// process and doesn't count. Can't tell: none found.
+/// process and doesn't count, and neither does a status line run (see
+/// [`still_running`]). Can't tell: none found.
 pub fn app_process_running() -> bool {
+    let first = app_processes();
+    if first.is_empty() {
+        return false;
+    }
+    std::thread::sleep(LOOK_AGAIN_AFTER);
+    still_running(&first, &app_processes())
+}
+
+/// The app's program's processes other than this one, by name.
+fn app_processes() -> HashSet<u32> {
     let me = std::process::id();
     let listing = |program: &str, args: &[&str]| {
         let mut cmd = std::process::Command::new(program);
@@ -111,11 +136,15 @@ pub fn app_process_running() -> bool {
             .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
     };
     if cfg!(windows) {
-        listing("tasklist", &["/FO", "CSV", "/NH"]).is_some_and(|csv| app_in_tasklist(&csv, me))
+        listing("tasklist", &["/FO", "CSV", "/NH"])
+            .map(|csv| app_in_tasklist(&csv, me))
+            .unwrap_or_default()
     } else if cfg!(target_os = "macos") {
-        listing("ps", &["-axo", "pid=,comm="]).is_some_and(|ps| app_in_ps(&ps, me))
+        listing("ps", &["-axo", "pid=,comm="])
+            .map(|ps| app_in_ps(&ps, me))
+            .unwrap_or_default()
     } else {
-        false
+        HashSet::new()
     }
 }
 
@@ -129,7 +158,7 @@ mod tests {
             "\"System Idle Process\",\"0\",\"Services\",\"0\",\"8 K\"\n",
             "\"claude.exe\",\"4120\",\"Console\",\"1\",\"90,000 K\"\n",
         );
-        assert!(!app_in_tasklist(csv, 1));
+        assert!(app_in_tasklist(csv, 1).is_empty());
         for image in [
             "pitstop-app.exe",
             "Piaz Switch.exe",
@@ -137,24 +166,34 @@ mod tests {
             "PITSTOP-APP.EXE",
         ] {
             let listed = format!("{csv}\"{image}\",\"10524\",\"Console\",\"1\",\"120,000 K\"\n");
-            assert!(app_in_tasklist(&listed, 1), "{image}");
+            assert_eq!(app_in_tasklist(&listed, 1), [10524].into(), "{image}");
             // The renewal itself, run as the app's program.
-            assert!(!app_in_tasklist(&listed, 10524), "{image}");
+            assert!(app_in_tasklist(&listed, 10524).is_empty(), "{image}");
         }
-        assert!(!app_in_tasklist(
-            "\"piaz-switch.exe\",\"77\",\"Console\",\"1\",\"5 K\"",
-            1
-        ));
-        assert!(!app_in_tasklist("INFO: No tasks are running", 1));
+        assert!(
+            app_in_tasklist("\"piaz-switch.exe\",\"77\",\"Console\",\"1\",\"5 K\"", 1).is_empty()
+        );
+        assert!(app_in_tasklist("INFO: No tasks are running", 1).is_empty());
 
         let ps =
             "  1 /sbin/launchd\n 812 /Applications/Piaz Switch.app/Contents/MacOS/pitstop-app\n";
-        assert!(app_in_ps(ps, 1));
-        assert!(!app_in_ps(ps, 812));
-        assert!(!app_in_ps(
-            "  1 /sbin/launchd\n 90 /usr/local/bin/piaz-switch\n",
-            1
-        ));
+        assert_eq!(app_in_ps(ps, 1), [812].into());
+        assert!(app_in_ps(ps, 812).is_empty());
+        assert!(app_in_ps("  1 /sbin/launchd\n 90 /usr/local/bin/piaz-switch\n", 1).is_empty());
+    }
+
+    #[test]
+    fn a_status_line_run_gone_a_moment_later_isnt_the_app() {
+        // The app (10524) both times; a status line run (777) only the first.
+        let first: HashSet<u32> = [10524, 777].into();
+        let second: HashSet<u32> = [10524].into();
+        assert!(still_running(&first, &second));
+        // Only a status line run, gone by the second look.
+        let first: HashSet<u32> = [777].into();
+        assert!(!still_running(&first, &HashSet::new()));
+        // Another short run in the second look is another process.
+        let second: HashSet<u32> = [778].into();
+        assert!(!still_running(&first, &second));
     }
 
     #[test]

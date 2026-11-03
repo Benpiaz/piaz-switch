@@ -84,6 +84,7 @@ fn main() {
             commands::set_autostart,
             commands::dismiss_tip,
             jumplist::take_pending_dialog,
+            jumplist::dialog_opened,
             welcome::get_welcome,
             welcome::set_welcomed,
             welcome::open_taskbar_settings,

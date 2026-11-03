@@ -303,7 +303,7 @@ pub async fn rename_account(
             if pid == ProviderId::ClaudeCode {
                 crate::warm::follow_rename(&app::host(), &name, &account.name);
             }
-            crate::webwin::follow_rename(&app, pid, &name, &account.name);
+            crate::webwin::follow_rename(&app, pid, &name, account);
         }
         app::refresh(&app);
         renamed.map(|_| ()).map_err(|e| UiError::from(&e))
@@ -318,9 +318,16 @@ pub async fn forget_account(app: AppHandle, provider: String, name: String) -> A
     let pid = self::provider(&provider)?;
     blocking(move || {
         let state = app.state::<AppState>();
-        let removed = {
+        let (removed, was) = {
             let _op = state.ops.lock();
-            app::engine().remove(&name, Some(pid))
+            let engine = app::engine();
+            // As it was: its web profile is named by who it is on macOS.
+            let was = engine.state().ok().and_then(|s| {
+                s.accounts
+                    .into_iter()
+                    .find(|a| a.provider == pid && a.name == name)
+            });
+            (engine.remove(&name, Some(pid)), was)
         };
         app::log(
             &app::host(),
@@ -332,8 +339,8 @@ pub async fn forget_account(app: AppHandle, provider: String, name: String) -> A
         if removed.is_ok() && pid == ProviderId::ClaudeCode {
             crate::warm::follow_forget(&app::host(), &name);
         }
-        if removed.is_ok() {
-            crate::webwin::follow_forget(&app, pid, &name);
+        if let (Ok(_), Some(was)) = (&removed, &was) {
+            crate::webwin::follow_forget(&app, pid, was);
         }
         app::refresh(&app);
         removed
