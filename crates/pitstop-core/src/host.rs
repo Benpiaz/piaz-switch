@@ -21,6 +21,11 @@ pub trait Host {
     /// Pitstop's own secure storage (Credential Manager / Keychain via `keyring`).
     fn keystore_get(&self, name: &str) -> Result<Option<String>>;
     fn keystore_set(&self, name: &str, value: &str) -> Result<()>;
+    /// The DeepSeek API key OpenCode uses, as the JSON it stores; None when it holds none. See
+    /// [`crate::opencode_db`].
+    fn deepseek_get(&self) -> Result<Option<String>>;
+    /// Make `value` the DeepSeek key OpenCode uses.
+    fn deepseek_set(&self, value: &str) -> Result<()>;
     /// Where editors keep their data: `%APPDATA%` on Windows,
     /// `~/Library/Application Support` on macOS, `~/.config` elsewhere.
     fn app_data(&self) -> PathBuf;
@@ -115,6 +120,10 @@ impl RealHost {
         Self {
             home_override: Some(home),
         }
+    }
+
+    fn opencode_db(&self) -> PathBuf {
+        self.home().join(".local/share/opencode/opencode.db")
     }
 }
 
@@ -305,6 +314,14 @@ impl Host for RealHost {
             Err(keyring::Error::NoEntry) => Ok(None),
             Err(e) => Err(Error::Keystore(e.to_string())),
         }
+    }
+
+    fn deepseek_get(&self) -> Result<Option<String>> {
+        crate::opencode_db::get(&self.opencode_db(), "deepseek")
+    }
+
+    fn deepseek_set(&self, value: &str) -> Result<()> {
+        crate::opencode_db::put(&self.opencode_db(), "deepseek", "DeepSeek", value)
     }
 
     fn keystore_set(&self, name: &str, value: &str) -> Result<()> {

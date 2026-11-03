@@ -1,5 +1,32 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- **Claude Code live limits** in Settings: Claude Code hands its 5-hour and weekly limits
+  to Piaz Switch through a status line (`pitstop-app --statusline`), so the account in
+  use keeps its numbers when the usage endpoint turns reads away (Claude Code 2.1.80
+  or later). A status line of your own is never replaced.
+- **DeepSeek** accounts: park, switch and see the balance of the DeepSeek API key that
+  OpenCode uses. The card shows the money left, an empty
+  balance counts as a used-up limit, and automatic switching moves to a key with money.
+  The card says whether DeepSeek's peak-price hours are on and how long until that changes,
+  and Settings has a minimum balance below which a key counts as used up. Sign in with
+  OpenCode, then name the key in Piaz Switch; sessions that were already running keep
+  their key.
+
+### Changed
+- Limits read as short blocks under a heading for their scope (Fable, Gemini): the name
+  and figure on one line, a flat bar under it, the timing last, and a scope's limits side
+  by side when there is room. Rows read "5-Hour Limit" and "Weekly Limit" ("Giới hạn 5
+  giờ", "Giới hạn tuần") in place of `5h` and `week Fable`; the glow, gloss, notches and
+  pace pills are gone.
+
+### Fixed
+- When usage reads have been turned away (rate limited) or missed for over six
+  minutes, the header says how old the reading on screen is ("Updated 14:02 (12
+  min ago) · no newer numbers yet") instead of showing a bare time that looks current.
+
 ## [0.5.4] - 2026-10-31
 
 ### Fixed

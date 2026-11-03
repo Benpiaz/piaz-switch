@@ -216,10 +216,15 @@ fn main() {
                                 replaced.label.as_deref().unwrap_or("an unknown account"),
                             );
                         }
-                        if provider == ProviderId::Codex {
-                            println!(
+                        match provider {
+                            ProviderId::Codex => println!(
                                 "Note: a running Codex keeps the old account until restarted."
-                            );
+                            ),
+                            ProviderId::DeepSeek => println!(
+                                "Note: {} sessions already running keep the old account; new ones use this one.",
+                                provider.display_name()
+                            ),
+                            _ => {}
                         }
                     }
                 }

@@ -233,6 +233,50 @@ function windowName(label, long) {
   return [name, ...rest].join(" ");
 }
 
+/** `5h Gemini` as its period (`5h`) and the scope it covers (`Gemini`); a
+ * label with no period is a name of its own, with no scope above it. */
+function splitWindow(label) {
+  const [head, ...rest] = label.split(" ");
+  return ["5h", "week", "month"].includes(head) && rest.length ? { period: head, scope: rest.join(" ") } : { period: label, scope: "" };
+}
+
+/** A limit's row label: its period as a limit (`5-hour limit`, `giới hạn tuần`);
+ * a name that is no period stays as it is. */
+function windowLabel(period) {
+  const keys = { "5h": "windowRow5h", week: "windowRowWeek", month: "windowRowMonth" };
+  return keys[period] ? t(keys[period]) : period;
+}
+
+/** The block of limits of one scope (`Gemini`, `Fable`), under its heading:
+ * the last one when the scope goes on, a new one when it changes. */
+function scopeOf(grid, scope) {
+  const last = grid.lastElementChild;
+  if (last && last.dataset.scope === scope) return last;
+  const box = h("div", { class: "scope", "data-scope": scope }, scope ? h("div", { class: "meter-scope", text: scope }) : null);
+  grid.append(box);
+  return box;
+}
+
+/** Whether DeepSeek's peak-price hours (UTC, Monday to Friday) are on, and
+ * how long until that changes. Chinese public holidays are not counted. */
+function deepseekPeak(now) {
+  const day = Math.floor(now / 86400);
+  const spans = [];
+  for (let d = day; d < day + 8; d++) {
+    const weekday = new Date(d * 86400000).getUTCDay();
+    if (weekday >= 1 && weekday <= 5)
+      for (const [from, to] of [[1, 4], [6, 10]]) spans.push([d * 86400 + from * 3600, d * 86400 + to * 3600]);
+  }
+  const current = spans.find(([from, to]) => now >= from && now < to);
+  return current ? { peak: true, left: current[1] - now } : { peak: false, left: spans.find(([from]) => from > now)[0] - now };
+}
+
+/** The price period DeepSeek is in now, beside its name. */
+function peakChip() {
+  const { peak, left } = deepseekPeak(nowSecs());
+  return h("span", { class: "peak" + (peak ? " on" : ""), title: t("peakHelp") }, h("span", { class: "peak-dot", "aria-hidden": "true" }), t(peak ? "peakOn" : "peakOff", { d: duration(left) }));
+}
+
 function duration(secs) {
   const d = Math.floor(secs / 86400);
   const hours = Math.floor((secs % 86400) / 3600);
@@ -258,11 +302,16 @@ function clockTime(at) {
   });
 }
 
+/** Usage is read every five minutes; a reading older than that plus a minute
+ * means the reads since then were turned away or missed. */
+const BEHIND_AFTER_SECS = 6 * 60;
+
 function updatedText() {
   if (!snap) return "";
   if (snap.reading) return t("reading");
-  if (snap.updatedAt) return t("updated", { time: clockTime(snap.updatedAt) });
-  return t("notReadYet");
+  if (!snap.updatedAt) return t("notReadYet");
+  const time = clockTime(snap.updatedAt);
+  return nowSecs() - snap.updatedAt > BEHIND_AFTER_SECS ? t("updatedBehind", { time, ago: ago(snap.updatedAt) }) : t("updated", { time });
 }
 
 /** Where an even use of a limit would be by now, and which side of it the
@@ -525,6 +574,7 @@ function renderAccounts(moves) {
             toolLogo(tool.id),
             h("span", { text: tool.name }),
             h("span", { class: "count", "aria-hidden": "true", text: String(tool.accounts.length) }),
+            tool.id === "deepseek" ? peakChip() : null,
           ),
           groupAdd(tool),
         ),
@@ -634,10 +684,13 @@ function sideOf(tool, account) {
 /** One line per limit: name, bar with the even-pace tick, figure, timing. */
 function metersOf(tool, account, moves) {
   const windows = shownWindows(account.usage);
-  if (!windows.length) return null;
+  const balance = account.usage && account.usage.status === "ok" ? account.usage.balance : null;
+  if (!windows.length && !balance) return null;
   const now = nowSecs();
   const grid = h("div", { class: "meters" });
+  if (balance) balanceLine(scopeOf(grid, ""), account.usage, balance);
   for (const w of windows) {
+    const part = splitWindow(w.label);
     // Past its reset a limit has started afresh, before the next read says so.
     const fresh = Boolean(w.resetsAt && w.resetsAt <= now);
     const resets = fresh
@@ -647,9 +700,9 @@ function metersOf(tool, account, moves) {
         : w.idle
           ? t("notStarted")
           : "";
-    meterLine(grid, moves, {
+    meterLine(scopeOf(grid, part.scope), moves, {
       id: `${rowKey(tool.id, account.name)}|${w.label}`,
-      label: windowName(w.label),
+      label: windowLabel(part.period),
       used: fresh ? 0 : w.percent,
       pace: fresh ? null : paceOf(w, now),
       resets,
@@ -659,10 +712,36 @@ function metersOf(tool, account, moves) {
   return grid;
 }
 
+/** The label of the limit a money balance stands in as, for switching; the
+ * balance itself is shown as an amount. */
+const BALANCE = "balance";
+
+/** What is left to spend, as money: the amount, and a note once it is gone. */
+function balanceLine(grid, usage, balance) {
+  const out = usage.windows.some((w) => w.label === BALANCE && w.percent >= 100);
+  let amount;
+  try {
+    amount = new Intl.NumberFormat(LANG === "vi" ? "vi-VN" : "en-US", { style: "currency", currency: balance.currency }).format(balance.amount);
+  } catch {
+    amount = `${balance.amount.toFixed(2)} ${balance.currency}`;
+  }
+  const least = snap.automation.deepseekMinBalance;
+  const note = out ? t(balance.amount > 0 ? "balanceBelow" : "balanceOut", { n: least }) : "";
+  grid.append(
+    h(
+      "div",
+      { class: "limit balance" + (out ? " out" : "") },
+      h("span", { class: "meter-label", text: t("balanceLabel") }),
+      h("span", { class: "meter-figure", text: amount }),
+      note ? h("span", { class: "meter-meta" }, h("span", { class: "meter-note", text: note })) : null,
+    ),
+  );
+}
+
 /** The limits an account lists as its own: those read, less the
  * per-model ones nobody has used yet (`quiet`), which only totals count. */
 function shownWindows(usage) {
-  return usage && usage.status === "ok" ? usage.windows.filter((w) => !w.quiet) : [];
+  return usage && usage.status === "ok" ? usage.windows.filter((w) => !w.quiet && w.label !== BALANCE) : [];
 }
 
 /** How much of a limit a plan holds next to a plain one: the `5` of
@@ -725,10 +804,11 @@ function poolRow(tool, moves) {
     }
     const n = found.length;
     const idle = !nextReset && !reset && found.every(([, w]) => w.idle);
-    meterLine(grid, moves, {
+    const part = splitWindow(label);
+    meterLine(scopeOf(grid, part.scope), moves, {
       // `*` can't be in an account's name, so this never meets a row's id.
       id: `${tool.id}|*pool|${label}`,
-      label: windowName(label),
+      label: windowLabel(part.period),
       used,
       pace,
       resets: nextReset ? t("poolResets", { d: duration(nextReset - now) }) : reset ? t("justReset") : idle ? t("notStarted") : "",
@@ -788,14 +868,20 @@ function meterLine(grid, moves, { id, label, used, pace, resets, resetsHelp, hel
   if (help) bar.title = bar.title ? `${help} · ${bar.title}` : help;
   const paceWords = off ? t(pace.standing === "over" ? "overPace" : "underPace", { n: Math.round(Math.abs(pace.diff)) }) : "";
   grid.append(
-    h("span", { class: "meter-label", text: label }),
-    bar,
-    h("span", { class: "meter-figure" }, String(Math.round(used)), h("span", { class: "unit", text: "%" })),
     h(
-      "span",
-      { class: "meter-meta" },
-      resets ? h("span", { class: "meter-resets", text: resets, title: resetsHelp }) : null,
-      paceWords ? h("span", { class: "meter-pace" + (pace.standing === "over" ? " over" : ""), text: paceWords }) : null,
+      "div",
+      { class: "limit" },
+      h("span", { class: "meter-label", text: label }),
+      h("span", { class: "meter-figure" }, String(Math.round(used)), h("span", { class: "unit", text: "%" })),
+      bar,
+      resets || paceWords
+        ? h(
+            "span",
+            { class: "meter-meta" },
+            resets ? h("span", { class: "meter-resets", text: resets, title: resetsHelp }) : null,
+            paceWords ? h("span", { class: "meter-pace" + (pace.standing === "over" ? " over" : ""), text: paceWords }) : null,
+          )
+        : null,
     ),
   );
 
@@ -854,7 +940,7 @@ function notesOf(tool, account) {
         : t("usageFailed", { message: usage.message });
     chips.push(h("span", { class: "chip warn", title: usage.message }, icon("warning"), h("span", { text })));
   }
-  if (usage && usage.status === "ok" && !shownWindows(usage).length) chips.push(h("span", { class: "chip" }, h("span", { text: t("noLimits") })));
+  if (usage && usage.status === "ok" && !shownWindows(usage).length && !usage.balance) chips.push(h("span", { class: "chip" }, h("span", { text: t("noLimits") })));
   if (warm) {
     const tone = (warm.standing && WARM_TONES[warm.standing.state]) || "";
     chips.push(
@@ -1494,7 +1580,7 @@ const DIALOGS = {
             ],
         missing.map((x) =>
           // Antigravity counts only as its editor: say so, since the Antigravity 2 app may be there.
-          h("p", { class: "footnote", text: x.id === "antigravity" ? t("appMissingAntigravity") : isEditor(x.id) ? t("appMissing", { tool: x.name }) : t("toolMissing", { tool: x.name, program: x.id === "codex" ? "codex" : "claude" }) }),
+          h("p", { class: "footnote", text: x.id === "antigravity" ? t("appMissingAntigravity") : isEditor(x.id) ? t("appMissing", { tool: x.name }) : t("toolMissing", { tool: x.name, program: { codex: "codex", deepseek: "OpenCode" }[x.id] || "claude" }) }),
         ),
         d.again ? null : h("p", { class: "footnote", text: isEditor(d.provider) ? t("addWarningEditor", { tool: toolName }) : t("addWarning") }),
       ),
@@ -1834,6 +1920,10 @@ function renderSettings() {
     "aria-label": t("openAtLogin"),
     onclick: () => invoke("set_autostart", { on: !on }).catch((error) => openAlert(t("couldntChange"), errorText(error))),
   });
+  const statusLineOn = Boolean(snap && snap.statusLine);
+  const statusLine = statusLineOn
+    ? h("span", { class: "setting-name", text: t("statusLineOn") })
+    : button(t("statusLineTurnOn"), () => invoke("enable_status_line").catch((error) => openAlert(t("couldntChange"), errorText(error))));
   return h(
     "div",
     { class: "settings" },
@@ -1851,6 +1941,12 @@ function renderSettings() {
           { class: "setting-row" },
           h("div", null, h("div", { class: "setting-name", text: t("openAtLogin") }), h("p", { class: "help", text: t("openAtLoginHelp") })),
           keyed(autostart, "autostart"),
+        ),
+        h(
+          "div",
+          { class: "setting-row" },
+          h("div", null, h("div", { class: "setting-name", text: t("statusLineName") }), h("p", { class: "help", text: t(statusLineOn ? "statusLineOnHelp" : "statusLineHelp") })),
+          keyed(statusLine, "statusLine"),
         ),
       ),
     ),
@@ -1964,6 +2060,13 @@ function automationGroups() {
     },
     Array.from({ length: 11 }, (_, i) => 50 + i * 5).map((n) => h("option", { value: String(n), selected: n === a.autoSwitchAt }, `${n}%`)),
   );
+  const least = h(
+    "select",
+    { "aria-label": t("deepseekMin"), onchange: (event) => changeSetting({ deepseekMinBalance: Number(event.target.value) }) },
+    [...new Set([0, 1, 2, 5, 10, 20, 50, 100, a.deepseekMinBalance])]
+      .sort((x, y) => x - y)
+      .map((n) => h("option", { value: String(n), selected: n === a.deepseekMinBalance }, String(n))),
+  );
   const automatic = h(
     "section",
     { class: "group" },
@@ -1982,6 +2085,12 @@ function automationGroups() {
         { class: "setting-row" + (a.autoSwitch ? "" : " muted") },
         h("div", { class: "setting-name", text: t("autoSwitchAt") }),
         h("span", { class: "select" }, keyed(threshold, "auto-switch-at")),
+      ),
+      h(
+        "div",
+        { class: "setting-row" + (a.autoSwitch ? "" : " muted") },
+        h("div", null, h("div", { class: "setting-name", text: t("deepseekMin") }), h("p", { class: "help", text: t("deepseekMinHelp") })),
+        h("span", { class: "select" }, keyed(least, "deepseek-min")),
       ),
       h(
         "div",

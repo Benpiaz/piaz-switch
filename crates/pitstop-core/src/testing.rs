@@ -13,6 +13,8 @@ pub struct FakeHost {
     keychain: RefCell<BTreeMap<String, String>>,
     keystore: RefCell<BTreeMap<String, String>>,
     fail_writes: RefCell<BTreeMap<PathBuf, u32>>,
+    /// The DeepSeek key OpenCode holds.
+    deepseek: RefCell<Option<String>>,
     /// Editors' `state.vscdb` tables, by database path.
     vscdbs: RefCell<BTreeMap<PathBuf, BTreeMap<String, String>>>,
     /// Editors open now.
@@ -77,6 +79,14 @@ impl FakeHost {
     /// Everything an editor's database holds.
     pub fn vscdb(&self, db: &Path) -> Option<BTreeMap<String, String>> {
         self.vscdbs.borrow().get(db).cloned()
+    }
+
+    pub fn put_deepseek(&self, value: &str) {
+        *self.deepseek.borrow_mut() = Some(value.to_owned());
+    }
+
+    pub fn deepseek(&self) -> Option<String> {
+        self.deepseek.borrow().clone()
     }
 
     pub fn delete_keystore_entry(&self, name: &str) {
@@ -154,14 +164,21 @@ impl Host for FakeHost {
         Ok(())
     }
 
+    /// Files directly under `path`, and the folders that hold deeper ones.
     fn list_dir(&self, path: &Path) -> Result<Vec<PathBuf>> {
-        Ok(self
+        let dir = self.key(path);
+        let mut entries: Vec<PathBuf> = self
             .files
             .borrow()
             .keys()
-            .filter(|p| p.parent() == Some(self.key(path).as_path()))
-            .cloned()
-            .collect())
+            .filter_map(|p| {
+                let below = p.strip_prefix(&dir).ok()?;
+                Some(dir.join(below.components().next()?))
+            })
+            .collect();
+        entries.sort();
+        entries.dedup();
+        Ok(entries)
     }
 
     fn keychain_get(&self, service: &str) -> Result<Option<String>> {
@@ -177,6 +194,15 @@ impl Host for FakeHost {
 
     fn keychain_delete(&self, service: &str) -> Result<()> {
         self.keychain.borrow_mut().remove(service);
+        Ok(())
+    }
+
+    fn deepseek_get(&self) -> Result<Option<String>> {
+        Ok(self.deepseek.borrow().clone())
+    }
+
+    fn deepseek_set(&self, value: &str) -> Result<()> {
+        *self.deepseek.borrow_mut() = Some(value.to_owned());
         Ok(())
     }
 

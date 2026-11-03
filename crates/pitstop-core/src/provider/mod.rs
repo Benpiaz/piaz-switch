@@ -2,6 +2,7 @@ pub mod antigravity;
 pub mod claude_code;
 pub mod codex;
 pub mod cursor;
+pub mod deepseek;
 
 use std::path::Path;
 
@@ -20,14 +21,18 @@ pub enum ProviderId {
     Cursor,
     #[serde(rename = "antigravity")]
     Antigravity,
+    /// A DeepSeek API key, as OpenCode uses it.
+    #[serde(rename = "deepseek")]
+    DeepSeek,
 }
 
 impl ProviderId {
-    pub const ALL: [ProviderId; 4] = [
+    pub const ALL: [ProviderId; 5] = [
         ProviderId::ClaudeCode,
         ProviderId::Codex,
         ProviderId::Cursor,
         ProviderId::Antigravity,
+        ProviderId::DeepSeek,
     ];
 
     pub fn as_str(&self) -> &'static str {
@@ -36,6 +41,7 @@ impl ProviderId {
             ProviderId::Codex => "codex",
             ProviderId::Cursor => "cursor",
             ProviderId::Antigravity => "antigravity",
+            ProviderId::DeepSeek => "deepseek",
         }
     }
 
@@ -50,6 +56,7 @@ impl ProviderId {
             ProviderId::Codex => "Codex",
             ProviderId::Cursor => "Cursor",
             ProviderId::Antigravity => "Antigravity",
+            ProviderId::DeepSeek => "DeepSeek",
         }
     }
 
@@ -59,8 +66,9 @@ impl ProviderId {
             "codex" => Ok(ProviderId::Codex),
             "cursor" => Ok(ProviderId::Cursor),
             "antigravity" | "gemini" => Ok(ProviderId::Antigravity),
+            "deepseek" => Ok(ProviderId::DeepSeek),
             other => Err(Error::InvalidData(format!(
-                "unknown provider `{other}` (use claude-code, codex, cursor or antigravity)"
+                "unknown provider `{other}` (use claude-code, codex, cursor, antigravity or deepseek)"
             ))),
         }
     }
@@ -132,5 +140,6 @@ pub fn provider_for(id: ProviderId) -> Box<dyn Provider> {
         ProviderId::Codex => Box::new(codex::Codex),
         ProviderId::Cursor => Box::new(cursor::Cursor),
         ProviderId::Antigravity => Box::new(antigravity::Antigravity),
+        ProviderId::DeepSeek => Box::new(deepseek::DeepSeek),
     }
 }

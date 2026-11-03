@@ -294,7 +294,7 @@ pub fn warm_standing(
     now: i64,
 ) -> WarmStanding {
     let windows = match &account.usage {
-        Some(UsageView::Ok { windows }) => Some(windows),
+        Some(UsageView::Ok { windows, .. }) => Some(windows),
         // The reading of the account in use is made with Claude Code's own
         // login, which Claude Code renews when it runs.
         Some(UsageView::Expired) if account.in_use => return WarmStanding::Renewing,
@@ -417,7 +417,7 @@ pub fn switch_target(tool: &ToolView, threshold: u8, now: i64) -> Option<SwitchP
 
 fn windows_of(account: &AccountView) -> Option<&[WindowView]> {
     match &account.usage {
-        Some(UsageView::Ok { windows }) => Some(windows),
+        Some(UsageView::Ok { windows, .. }) => Some(windows),
         _ => None,
     }
 }
@@ -626,7 +626,10 @@ mod tests {
     }
 
     fn ok(windows: Vec<WindowView>) -> Option<UsageView> {
-        Some(UsageView::Ok { windows })
+        Some(UsageView::Ok {
+            windows,
+            balance: None,
+        })
     }
 
     fn claude(accounts: Vec<AccountView>) -> ToolView {
