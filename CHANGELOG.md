@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.5] - 2026-11-03
+
+### Fixed
+- A parked Claude Code account no longer shows "Token expired" with no limits
+  for hours. A login is parked with whatever time its access token has left
+  (about 8 hours after Claude Code last renewed it, often minutes), and only a
+  warm-up renewed it, once one was due. Piaz Switch now renews a parked login
+  itself, the way Claude Code does, before the next read after its token lapses,
+  so its limits keep showing and the automatic switch can count on it. The
+  login in use is never touched: Claude Code renews that one. A login Anthropic
+  no longer renews asks you to sign in again instead of saying it will renew.
+
 ## [0.5.4] - 2026-10-31
 
 ### Fixed
