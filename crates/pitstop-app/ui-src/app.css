@@ -1031,6 +1031,60 @@
     color: var(--ink-2);
   }
 
+  /* The accounts of one tool sit side by side, a card each; the pooled row
+     spans the lot. */
+  .accounts .panel {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 10px;
+    overflow: visible;
+    background: none;
+    box-shadow: none;
+  }
+  .accounts .panel::after,
+  .accounts .row + .row::before {
+    display: none;
+  }
+  .accounts .row {
+    grid-template-columns: 34px minmax(0, 1fr);
+    row-gap: 10px;
+    align-content: start;
+    padding: 14px;
+    border-radius: var(--r-lg);
+    background-color: var(--surface-card);
+    box-shadow: var(--panel-outer);
+  }
+  .accounts .row.in-use {
+    box-shadow: 0 0 0 1.5px var(--accent), var(--panel-outer);
+  }
+  .accounts .row.pool {
+    grid-column: 1 / -1;
+    box-shadow: none;
+  }
+  .accounts .row-side {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    justify-content: flex-start;
+  }
+  .accounts .row .meters {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    grid-template-columns: 1fr;
+    gap: 14px;
+    margin-top: 4px;
+  }
+  .accounts .row.pool .meters {
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  }
+  .accounts .row-title {
+    flex-wrap: wrap;
+    gap: 2px 8px;
+  }
+  .accounts .row-name {
+    flex: none;
+    max-width: 100%;
+    font-size: 14px;
+  }
   .meters + .notes {
     margin-top: 12px;
   }

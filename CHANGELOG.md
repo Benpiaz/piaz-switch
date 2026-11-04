@@ -20,6 +20,9 @@
   their key.
 
 ### Changed
+- The accounts of one tool sit side by side as cards (three across in the default window,
+  fewer when it is narrow), each with its own limits and its Use button; the pooled row
+  spans the full width above them.
 - The wording of the limit rows, balance, peak-price and Settings texts reads more naturally
   in English and Vietnamese.
 - Limits read as short blocks under a heading for their scope (Fable, Gemini): the name
