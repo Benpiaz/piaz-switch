@@ -6,6 +6,7 @@ use pitstop_core::activity::{self, verb, By, Entry};
 use pitstop_core::doctor::{self, Check, Level};
 use pitstop_core::engine::{RemoveOutcome, SwitchOutcome};
 use pitstop_core::live::Live;
+use pitstop_core::usage::Http;
 use pitstop_core::{editor, signin, ProviderId};
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
@@ -92,6 +93,11 @@ pub fn switch(
             message: format!("{name} is warming up; switch when it ends"),
             name: Some(name.to_owned()),
         });
+    }
+    // Whose token Claude Code holds decides where the switch parks it: asked
+    // only when the token changed since the last read asked.
+    if pid == ProviderId::ClaudeCode {
+        app::engine().check_live(&Http::brief());
     }
     let unchanged = |needs_confirmation, replaced_label| Switched {
         switched: false,
@@ -255,6 +261,10 @@ pub async fn name_account(app: AppHandle, provider: String, name: String) -> Ans
     let pid = self::provider(&provider)?;
     blocking(move || {
         let state = app.state::<AppState>();
+        // Never named under the record alone: whose the token is decides.
+        if pid == ProviderId::ClaudeCode {
+            app::engine().check_live(&Http::brief());
+        }
         let enrolled = {
             let _op = state.ops.lock();
             app::engine().enroll(pid, &name)

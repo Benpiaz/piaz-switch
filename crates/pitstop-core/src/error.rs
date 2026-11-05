@@ -14,6 +14,20 @@ pub enum Error {
     AlreadyEnrolled { name: String, provider: String },
     #[error("that sign-in was {}, not `{name}`; sign in with `{name}`'s account", label.as_deref().unwrap_or("another account"))]
     WrongAccount { name: String, label: Option<String> },
+    #[error(
+        "{tool} is using {}'s login, but its own record says {}; sign in again in {tool} (/login) so the two agree",
+        label.as_deref().unwrap_or("another account"),
+        recorded.as_deref().unwrap_or("someone else")
+    )]
+    Misrecorded {
+        tool: String,
+        label: Option<String>,
+        recorded: Option<String>,
+    },
+    #[error(
+        "can't tell whose login {tool} is using: its own record names another account than the one in use, and Anthropic can't be asked about its token right now (offline, or the token lapsed until {tool} runs again); try again in a moment"
+    )]
+    Unverified { tool: String },
     #[error("no account named `{0}` — see `piaz-switch list`")]
     UnknownAccount(String),
     #[error("account name `{0}` is ambiguous across providers; pass --provider")]
@@ -55,6 +69,8 @@ impl Error {
             Error::DuplicateAccount(..) => "duplicateAccount",
             Error::AlreadyEnrolled { .. } => "alreadyEnrolled",
             Error::WrongAccount { .. } => "wrongAccount",
+            Error::Misrecorded { .. } => "misrecorded",
+            Error::Unverified { .. } => "unverified",
             Error::UnknownAccount(_) => "unknownAccount",
             Error::AmbiguousAccount(_) => "ambiguousAccount",
             Error::InvalidName(_) => "invalidName",

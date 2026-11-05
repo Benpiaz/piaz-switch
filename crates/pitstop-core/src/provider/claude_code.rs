@@ -38,6 +38,22 @@ struct Blob {
     oauth_account: serde_json::Value,
 }
 
+/// `login`'s credentials with `owner`'s `oauthAccount`: for a login whose
+/// token was found to be `owner`'s while Claude Code's record named someone
+/// else, so it parks, and switches back, as one account's.
+pub(crate) fn with_record_of(login: &[u8], owner: &[u8]) -> Result<Vec<u8>> {
+    let parse = |blob: &[u8]| {
+        serde_json::from_slice::<Blob>(blob)
+            .map_err(|e| Error::InvalidData(format!("claude-code blob: {e}")))
+    };
+    let (login, owner) = (parse(login)?, parse(owner)?);
+    serde_json::to_vec(&Blob {
+        credentials: login.credentials,
+        oauth_account: owner.oauth_account,
+    })
+    .map_err(|e| Error::InvalidData(format!("claude-code blob: {e}")))
+}
+
 pub struct ClaudeCode {
     /// Whether the token is in the Keychain instead of a file; `None` asks
     /// the host, which knows its OS.

@@ -81,6 +81,12 @@ impl Lang {
     pub fn not_named_yet(self) -> &'static str {
         self.pick("Not named yet", "Chưa đặt tên")
     }
+    pub fn sign_in_again_in_tool(self) -> &'static str {
+        self.pick(
+            "Its record names another account: run /login",
+            "Hồ sơ ghi tài khoản khác: chạy /login",
+        )
+    }
     pub fn unknown_login(self) -> &'static str {
         self.pick(
             "Login Piaz Switch can't identify",
@@ -427,6 +433,18 @@ impl Lang {
             }
             (Lang::Vi, "vaultBlobMissing" | "vaultCorrupt") => {
                 format!("Đăng nhập lại {name} trong Piaz Switch để chuyển sang nó.")
+            }
+            (Lang::En, "unverified") => format!(
+                "Piaz Switch can't tell whose login {tool} is using right now. Try again in a moment."
+            ),
+            (Lang::Vi, "unverified") => format!(
+                "Piaz Switch chưa xác định được {tool} đang dùng login của ai. Thử lại sau giây lát."
+            ),
+            (Lang::En, "misrecorded") => {
+                format!("{tool}'s record names another account than its login. Run /login in {tool}.")
+            }
+            (Lang::Vi, "misrecorded") => {
+                format!("Hồ sơ của {tool} ghi một tài khoản khác với login. Chạy /login trong {tool}.")
             }
             (Lang::En, "unknownAccount") => format!("{name} isn't in Piaz Switch any more."),
             (Lang::Vi, "unknownAccount") => format!("{name} không còn trong Piaz Switch."),
