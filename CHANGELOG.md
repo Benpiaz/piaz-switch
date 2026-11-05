@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.6.1] - 2026-11-05
 
 ### Fixed
 - Parked Claude Code logins no longer end up refused one after another ("sign in
