@@ -98,7 +98,8 @@ fn parse_provider(s: Option<&str>) -> Result<Option<ProviderId>> {
     })
 }
 
-fn print_list(state: &State, usage: &[AccountUsage]) {
+/// `live` is whose login each tool holds, where that could be read.
+fn print_list(state: &State, usage: &[AccountUsage], live: &[(ProviderId, Live)]) {
     if state.accounts.is_empty() {
         println!("No accounts enrolled yet. Park the login a tool is using with:");
         println!("  piaz-switch enroll <name> --provider claude-code|codex|cursor|antigravity");
@@ -115,8 +116,14 @@ fn print_list(state: &State, usage: &[AccountUsage]) {
             continue;
         }
         println!("{}:", provider.display_name());
+        let live = live.iter().find(|(p, _)| *p == provider).map(|(_, l)| l);
+        let in_use = match live {
+            Some(Live::Account(name)) => Some(name),
+            Some(_) => None,
+            None => state.active_name(provider),
+        };
         for account in accounts {
-            let mark = if state.active_name(provider) == Some(&account.name) {
+            let mark = if in_use == Some(&account.name) {
                 "*"
             } else {
                 " "
@@ -133,6 +140,19 @@ fn print_list(state: &State, usage: &[AccountUsage]) {
                 .find(|u| u.provider == provider && u.name == account.name)
             {
                 println!("      {}", u.report.summary(now_epoch()));
+            }
+        }
+        if let Some(Live::Unmanaged {
+            label, recorded, ..
+        }) = live
+        {
+            let label = label.as_deref().unwrap_or("an account it can't identify");
+            match recorded {
+                Some(recorded) => println!(
+                    "  ! signed in to {label}, though its own record says {recorded}: run /login in {} to mend it",
+                    provider.display_name()
+                ),
+                None => println!("  * {label} (not enrolled)"),
             }
         }
     }
@@ -374,7 +394,11 @@ fn main() {
                     engine.record_plans(&usage);
                     usage
                 };
-                print_list(&engine.state()?, &usage);
+                let live: Vec<_> = ProviderId::ALL
+                    .into_iter()
+                    .filter_map(|p| Some((p, engine.live(p).ok()?)))
+                    .collect();
+                print_list(&engine.state()?, &usage, &live);
             }
             Command::Enroll {
                 name,
@@ -382,6 +406,10 @@ fn main() {
                 sign_in: false,
             } => {
                 let provider = ProviderId::parse(&provider)?;
+                // Whose token Claude Code holds, not its record, is enrolled.
+                if provider == ProviderId::ClaudeCode {
+                    engine.check_live(&Http::brief());
+                }
                 let enrolled = engine.enroll(provider, &name);
                 record(
                     &host,
@@ -454,6 +482,15 @@ fn main() {
                             app.provider.display_name()
                         );
                     }
+                }
+                // Whose token Claude Code holds decides where it is parked.
+                let claude = State::load(&host)?.accounts.iter().any(|a| {
+                    a.name == name
+                        && a.provider == ProviderId::ClaudeCode
+                        && provider.is_none_or(|p| p == a.provider)
+                });
+                if claude {
+                    engine.check_live(&Http::brief());
                 }
                 let tool = owner(&engine, &name, provider);
                 let from = tool.and_then(|p| in_use(&engine, p));

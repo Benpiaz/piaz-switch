@@ -491,6 +491,12 @@ mod tests {
         ) -> std::result::Result<serde_json::Value, crate::usage::FetchError> {
             unreachable!()
         }
+        fn claude_profile(
+            &self,
+            _: &str,
+        ) -> std::result::Result<serde_json::Value, crate::usage::FetchError> {
+            unreachable!()
+        }
     }
 
     #[test]

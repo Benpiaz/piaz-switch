@@ -559,7 +559,7 @@ function renderAccounts(moves) {
   for (const suggestion of snap.suggestions) callouts.push(suggestionNotice(suggestion));
   for (const notice of notices) callouts.push(noticeRow(notice));
   for (const tool of snap.tools) {
-    if (tool.live.state === "unmanaged") callouts.push(nameTip(tool));
+    if (tool.live.state === "unmanaged") callouts.push(tool.live.recorded ? misrecordedTip(tool) : nameTip(tool));
   }
   const keys = new Set(callouts.map((el) => el.dataset.callout));
   for (const el of callouts) {
@@ -1010,6 +1010,19 @@ function nameTip(tool) {
     title: t("tipNameTitle"),
     lines: [email ? t("tipNameDetail", { tool: tool.name, email }) : t("tipNameUnknown", { tool: tool.name })],
     actions: [{ title: t("nameButton"), run: () => openName(tool.id) }],
+  });
+}
+
+/** The tool holds another account's token while its own record still
+ * names the account below: nothing to name until it signs in again. */
+function misrecordedTip(tool) {
+  const { label, recorded } = tool.live;
+  return noticeRow({
+    key: `tip-misrecorded:${tool.id}:${label || ""}:${recorded}`,
+    kind: "warning",
+    icon: "warning",
+    title: t("misrecordedTitle", { tool: tool.name }),
+    lines: [t("misrecordedDetail", { tool: tool.name, email: label || t("misrecordedSomeone"), recorded })],
   });
 }
 
@@ -1701,7 +1714,8 @@ const DIALOGS = {
           }),
           "switch-anyway",
         ),
-        keyed(button(t("nameItFirst"), () => openName(d.provider), "primary"), "primary"),
+        // A login whose record names someone else can't be named.
+        tool && tool.live.recorded ? null : keyed(button(t("nameItFirst"), () => openName(d.provider), "primary"), "primary"),
       ),
     ];
   },

@@ -21,6 +21,7 @@ use std::time::Duration;
 use serde_json::Value;
 
 pub const USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
+pub const PROFILE_URL: &str = "https://api.anthropic.com/api/oauth/profile";
 pub const CODEX_USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
 pub const CURSOR_USAGE_URL: &str =
     "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage";
@@ -80,6 +81,8 @@ pub const NETWORK: &str = "network: ";
 /// How long one try at a read may take. Slow links take seconds just to
 /// shake hands, so this is generous.
 const READ_TIMEOUT: Duration = Duration::from_secs(30);
+/// The same for a request someone is waiting on, such as a switch.
+const BRIEF_TIMEOUT: Duration = Duration::from_secs(5);
 /// The pause before the one retry of a read that got no answer.
 const RETRY_AFTER: Duration = Duration::from_secs(2);
 
@@ -93,6 +96,9 @@ pub enum FetchError {
 pub trait UsageApi: Sync {
     /// Anthropic's answer for a Claude Code access token.
     fn claude(&self, access_token: &str) -> Result<Value, FetchError>;
+    /// Whose a Claude Code access token is: the account and organization
+    /// Anthropic gave it to.
+    fn claude_profile(&self, access_token: &str) -> Result<Value, FetchError>;
     /// OpenAI's answer for a Codex access token and its ChatGPT account.
     fn codex(&self, access_token: &str, account_id: &str) -> Result<Value, FetchError>;
     /// Cursor's answer for its access token: this billing period's use,
@@ -111,8 +117,17 @@ pub struct Http {
 
 impl Http {
     pub fn new() -> Self {
+        Self::timing_out_after(READ_TIMEOUT)
+    }
+
+    /// For a request someone is waiting on: given up on sooner.
+    pub fn brief() -> Self {
+        Self::timing_out_after(BRIEF_TIMEOUT)
+    }
+
+    fn timing_out_after(timeout: Duration) -> Self {
         let agent = ureq::Agent::config_builder()
-            .timeout_global(Some(READ_TIMEOUT))
+            .timeout_global(Some(timeout))
             .http_status_as_error(false)
             .build()
             .into();
@@ -164,6 +179,17 @@ impl UsageApi for Http {
         let response = call_twice(|| {
             self.agent
                 .get(USAGE_URL)
+                .header("Authorization", format!("Bearer {access_token}"))
+                .header("anthropic-beta", "oauth-2025-04-20")
+                .call()
+        });
+        answer(response, "Anthropic")
+    }
+
+    fn claude_profile(&self, access_token: &str) -> Result<Value, FetchError> {
+        let response = call_twice(|| {
+            self.agent
+                .get(PROFILE_URL)
                 .header("Authorization", format!("Bearer {access_token}"))
                 .header("anthropic-beta", "oauth-2025-04-20")
                 .call()
@@ -255,17 +281,28 @@ pub(crate) enum Token {
     Missing,
 }
 
+/// `claudeAiOauth` of a claude-code blob.
+fn claude_oauth(blob: &[u8]) -> Option<Value> {
+    let blob = serde_json::from_slice::<Value>(blob).ok()?;
+    let credentials = serde_json::from_str::<Value>(blob.get("credentials")?.as_str()?).ok()?;
+    credentials.get("claudeAiOauth").cloned()
+}
+
+/// The access token of a claude-code blob, lapsed or not.
+pub(crate) fn claude_access_token(blob: &[u8]) -> Option<String> {
+    claude_oauth(blob)?
+        .get("accessToken")?
+        .as_str()
+        .map(str::to_owned)
+}
+
 /// Pull `claudeAiOauth.accessToken` out of a claude-code blob, unless its
 /// `expiresAt` (epoch ms) is already past. A login is signed out when its
 /// tokens are blank, as Claude Code leaves them once a renewal is refused, or
 /// when it lapsed with a refresh token that is blank or past
 /// `refreshTokenExpiresAt`: switching to it would leave Claude Code signed out.
 pub(crate) fn claude_token(blob: &[u8], now_secs: i64) -> Token {
-    let credentials = serde_json::from_slice::<Value>(blob)
-        .ok()
-        .and_then(|b| b.get("credentials")?.as_str().map(str::to_owned))
-        .and_then(|c| serde_json::from_str::<Value>(&c).ok());
-    let Some(oauth) = credentials.as_ref().and_then(|c| c.get("claudeAiOauth")) else {
+    let Some(oauth) = claude_oauth(blob) else {
         return Token::Missing;
     };
     let Some(token) = oauth.get("accessToken").and_then(Value::as_str) else {
@@ -299,13 +336,6 @@ pub struct ClaudeRenewal {
     /// Space-separated, as the request sends them.
     pub scopes: String,
     pub client_id: String,
-}
-
-/// The `claudeAiOauth` inside a claude-code vault blob.
-fn claude_oauth(blob: &[u8]) -> Option<Value> {
-    let blob = serde_json::from_slice::<Value>(blob).ok()?;
-    let credentials = serde_json::from_str::<Value>(blob.get("credentials")?.as_str()?).ok()?;
-    credentials.get("claudeAiOauth").cloned()
 }
 
 /// The refresh token of a claude-code blob: two logins holding the same one
@@ -382,6 +412,22 @@ pub(crate) fn claude_renewed(blob: &[u8], answer: &Value, now_secs: i64) -> Opti
     blob.as_object_mut()?
         .insert("credentials".into(), credentials.to_string().into());
     serde_json::to_vec(&blob).ok()
+}
+
+/// Whose Anthropic's profile answer says a token is: the identity accounts
+/// are recorded by (`<account>:<organization>`, as `oauthAccount` gives
+/// them) and the email.
+pub(crate) fn profile_owner(profile: &Value) -> Option<(String, Option<String>)> {
+    let account = profile.pointer("/account/uuid")?.as_str()?;
+    let organization = profile
+        .pointer("/organization/uuid")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let email = profile
+        .pointer("/account/email")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    Some((format!("{account}:{organization}"), email))
 }
 
 /// The access token and ChatGPT account id inside a codex vault blob, which
@@ -1082,6 +1128,21 @@ mod tests {
             summary,
             "5h 62% (2h10m) · week 48% (6d5h) · week Opus 12% (6d5h)"
         );
+    }
+
+    /// Anthropic's profile answer, trimmed (2026-10).
+    #[test]
+    fn a_profile_names_the_account_and_organization_a_token_is_for() {
+        let profile = json!({
+            "account": {"uuid": "acc-1", "email": "c@x.com", "display_name": "C"},
+            "organization": {"uuid": "org-1", "name": "Team", "organization_type": "claude_team"},
+            "application": {"name": "Claude Code"}
+        });
+        assert_eq!(
+            profile_owner(&profile),
+            Some(("acc-1:org-1".into(), Some("c@x.com".into())))
+        );
+        assert_eq!(profile_owner(&json!({"error": "nope"})), None);
     }
 
     #[test]

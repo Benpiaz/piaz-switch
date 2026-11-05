@@ -347,10 +347,19 @@ To refresh the shipped table: `cargo run -p pitstop-core --example update-prices
   from every program in it, so it doesn't count as Antigravity IDE. Where the app
   goes by the same program name as your editor, Piaz Switch counts it as the editor
   being open and leaves closing it to you.
-- Piaz Switch tells accounts apart by what the login files say. If another Claude Code
-  process rewrites `oauthAccount` in `~/.claude.json` for a different login, the
-  login in use can look unmanaged; Piaz Switch then leaves it alone rather than park it
-  under the wrong account.
+- Piaz Switch tells accounts apart by what the login files say. Claude Code keeps its
+  token apart from `oauthAccount` in `~/.claude.json`, and something can rewrite one
+  without the other (the Claude desktop app's Claude Code sessions write the desktop
+  app's own account into `~/.claude.json` and leave the token alone), so Piaz Switch
+  asks Anthropic whose the token is once each time it changes and believes that over
+  the record. A token of one of your accounts counts as that account, whatever the
+  record says; one of an account Piaz Switch doesn't manage is never parked under the
+  record's, and `/login` in Claude Code mends it. A token it hasn't been able to ask
+  about yet (offline, or lapsed before Piaz Switch ran) is taken to be the record's
+  while the record names the account in use; while it names another, a switch waits
+  until Anthropic can be asked. Each parked login's token is asked about the same
+  way, and one found to be another account's (filed there by an older version) asks
+  you to sign in again instead of showing that account's limits.
 - Claude Code on Windows can be switched to Windows Credential Manager (behind a
   feature flag). Piaz Switch reads and writes `.credentials.json`, so it does not see a
   login kept there.

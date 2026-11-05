@@ -3,6 +3,28 @@
 ## [Unreleased]
 
 ### Fixed
+- Parked Claude Code logins no longer end up refused one after another ("sign in
+  again", "its parked login can't be renewed"). Claude Code keeps its token apart
+  from the record of whose it is (`oauthAccount` in `~/.claude.json`), and the Claude
+  desktop app's Claude Code sessions write the desktop app's own account into that
+  record, leaving the token alone. Piaz Switch went by the record: it took the
+  account the desktop app is signed in to as the one in use, read the real one's
+  limits under its name, renewed the real one's parked copy (refused: Claude Code
+  had already renewed that chain), and on a switch parked the token under the wrong
+  account, so the next renewal of either was refused too. Piaz Switch now asks
+  Anthropic whose the token is, once each time it changes, and goes by that answer
+  for the account in use, its limits, renewals, warm-ups and where a switch parks it.
+- A switch waits, saying why, when Anthropic can't be asked whose Claude Code's
+  token is (offline, or the token lapsed until Claude Code runs again) and its record
+  names another account than the one in use: going by the record alone could park
+  the token under the wrong account, or take the switch as made already. Renewals
+  of parked logins skip both accounts it could be meanwhile. A login Claude Code
+  signed itself out of is never parked over an account's saved one, nor in the way
+  of a switch.
+- A parked Claude Code login filed under the wrong account asks you to sign in again
+  instead of showing the other account's limits under its name. Each parked token is
+  asked whose it is too, once each time it changes; logins an older version parked
+  under the wrong account, as above, are found this way.
 - A parked Claude Code login that can no longer be renewed says **sign in again**,
   with the button beside it, instead of "switching renews it". When Anthropic
   refused a renewal, during a warm-up or in Claude Code, Claude Code blanked the

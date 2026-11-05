@@ -3,7 +3,7 @@
 use crate::error::{Error, Result};
 use crate::host::Host;
 use crate::live::{self, Live};
-use crate::provider::{provider_for, Details, ProviderId};
+use crate::provider::{claude_code, provider_for, ActiveCredential, Details, ProviderId};
 use crate::state::{AccountMeta, State};
 use crate::usage::{self, CodexToken, Token, UsageApi, UsageReport};
 use crate::vault;
@@ -83,7 +83,12 @@ impl<H: Host> Engine<H> {
 
     /// Whose login `provider`'s tool is using right now.
     pub fn live(&self, provider: ProviderId) -> Result<Live> {
-        let Some(current) = provider_for(provider).read_active(&self.host)? else {
+        let Some(LiveLogin {
+            current,
+            misrecorded,
+            ..
+        }) = self.read_live(provider)?
+        else {
             return Ok(Live::LoggedOut);
         };
         let state = State::load(&self.host)?;
@@ -92,22 +97,146 @@ impl<H: Host> Engine<H> {
             None => Live::Unmanaged {
                 label: current.details.label,
                 plan: current.details.plan,
+                recorded: misrecorded.and_then(|record| record.label),
             },
         })
+    }
+
+    /// The tool's live login, its owner as the last check of its token
+    /// found it (see [`live::Checked`]).
+    fn read_live(&self, provider: ProviderId) -> Result<Option<LiveLogin>> {
+        let Some(mut current) = provider_for(provider).read_active(&self.host)? else {
+            return Ok(None);
+        };
+        let record = current.details.clone();
+        let mut misrecorded = None;
+        let mut verified = true;
+        if provider == ProviderId::ClaudeCode {
+            let token = usage::claude_access_token(&current.blob);
+            let check = live::checked(&self.host, provider);
+            // Only a check of this very token: one of the token it renewed
+            // may be of a login another sign-in has replaced since.
+            verified = check.as_ref().is_some_and(|c| {
+                token
+                    .as_deref()
+                    .is_some_and(|t| live::fingerprint(t) == c.token)
+            });
+            let (details, record) = live::as_checked(
+                std::mem::take(&mut current.details),
+                token.as_deref(),
+                check.as_ref(),
+            );
+            current.details = details;
+            misrecorded = record;
+        }
+        Ok(Some(LiveLogin {
+            current,
+            misrecorded,
+            verified,
+            record,
+        }))
+    }
+
+    /// [`Engine::read_live`], without a Claude Code login it signed out of
+    /// (its tokens blank, or nothing left to renew them): one holds nothing
+    /// to park or keep from renewing, and nobody is using it.
+    fn read_live_signed_in(&self, provider: ProviderId) -> Result<Option<LiveLogin>> {
+        let now = now_epoch() as i64;
+        Ok(self.read_live(provider)?.filter(|login| {
+            provider != ProviderId::ClaudeCode
+                || !matches!(
+                    usage::claude_token(&login.current.blob, now),
+                    Token::SignedOut
+                )
+        }))
+    }
+
+    /// Ask Anthropic whose token Claude Code's live login carries, unless
+    /// that token was asked about already: one short request each time the
+    /// token changes. Best effort: an answer that doesn't come leaves the
+    /// login's record (or the last check, for a token it renewed) to say
+    /// whose it is. Call it before anything that parks the live login.
+    pub fn check_live(&self, api: &dyn UsageApi) {
+        let pid = ProviderId::ClaudeCode;
+        let Ok(Some(current)) = provider_for(pid).read_active(&self.host) else {
+            return;
+        };
+        let Some(token) = usage::claude_access_token(&current.blob) else {
+            return;
+        };
+        let print = live::fingerprint(&token);
+        if live::checked(&self.host, pid).is_some_and(|c| c.token == print) {
+            return;
+        }
+        // A lapsed token is renewed by Claude Code, and the new one asked about.
+        if !matches!(
+            usage::claude_token(&current.blob, now_epoch() as i64),
+            Token::Valid(_)
+        ) {
+            return;
+        }
+        let Some((identity, label)) = api
+            .claude_profile(&token)
+            .ok()
+            .and_then(|profile| usage::profile_owner(&profile))
+        else {
+            return;
+        };
+        self.keep_check(print, &current.details, identity, label);
+    }
+
+    /// Keep Anthropic's answer that the token `print`, read with `record`,
+    /// is `identity`'s, unless Claude Code holds another token by now: a
+    /// switch while Anthropic was asked put another login in place, and the
+    /// answer, of one that's gone, would be taken for the new one's.
+    fn keep_check(&self, print: String, record: &Details, identity: String, label: Option<String>) {
+        let pid = ProviderId::ClaudeCode;
+        let still = provider_for(pid)
+            .read_active(&self.host)
+            .ok()
+            .flatten()
+            .and_then(|now| usage::claude_access_token(&now.blob))
+            .is_some_and(|t| live::fingerprint(&t) == print);
+        if !still {
+            return;
+        }
+        let recorded = live::misrecorded_as(record, &identity, label.as_deref());
+        let _ = live::record_check(
+            &self.host,
+            pid,
+            live::Checked {
+                token: print,
+                identity,
+                label,
+                recorded,
+            },
+        );
     }
 
     pub fn enroll(&self, provider: ProviderId, name: &str) -> Result<AccountMeta> {
         validate_name(name)?;
         let mut state = State::load(&self.host)?;
         refuse_taken_name(&state, provider, name, None)?;
-        let prov = provider_for(provider);
-        let active = prov
-            .read_active(&self.host)?
+        let LiveLogin {
+            current: active,
+            misrecorded,
+            ..
+        } = self
+            .read_live(provider)?
             .ok_or_else(|| Error::NotLoggedIn(provider.display_name().into()))?;
         if let Some(existing) = live::enrolled_as(&state, provider, &active.details) {
             return Err(Error::AlreadyEnrolled {
                 name: existing,
                 provider: provider.display_name().into(),
+            });
+        }
+        // Parked as it is, switching back would bring back a record naming
+        // someone else, and there is no record of its own to park it with.
+        if let Some(record) = misrecorded {
+            return Err(Error::Misrecorded {
+                tool: provider.display_name().into(),
+                label: active.details.label,
+                recorded: record.label,
             });
         }
         vault::store(&self.host, &vault_id(provider, name), &active.blob)?;
@@ -150,10 +279,49 @@ impl<H: Host> Engine<H> {
         let meta = resolve(&state, name, provider)?.clone();
         let pid = meta.provider;
         let prov = provider_for(pid);
-        let current = prov.read_active(&self.host)?;
+        let (current, misrecorded, verified) = match self.read_live_signed_in(pid)? {
+            // Unchecked, it is whoever its record names: a check of the token
+            // it renewed may be of a login `/login` replaced since.
+            Some(LiveLogin {
+                mut current,
+                misrecorded,
+                verified,
+                record,
+            }) => {
+                // A check of the token it renewed found it someone else's
+                // than its record says: whose this one is waits to be asked.
+                if !verified && misrecorded.is_some() {
+                    return Err(Error::Unverified {
+                        tool: pid.display_name().into(),
+                    });
+                }
+                if !verified {
+                    current.details = record;
+                }
+                (Some(current), verified && misrecorded.is_some(), verified)
+            }
+            None => (None, false, true),
+        };
         let owner = current
             .as_ref()
             .and_then(|c| live::owner(&state, pid, &c.details));
+
+        // Only the record says whose the live login is, and it names another
+        // account than the one put in use: something else may have rewritten
+        // it (the Claude desktop app writes its own account there). Gone by,
+        // the token would be parked under the wrong account, or this switch
+        // taken as made already; nothing moves until whose it is is known.
+        let active = state.active_name(pid).filter(|active| {
+            state
+                .accounts
+                .iter()
+                .any(|a| a.provider == pid && &a.name == *active)
+        });
+        if current.is_some() && !verified && active.is_some() && owner.as_ref() != active {
+            return Err(Error::Unverified {
+                tool: pid.display_name().into(),
+            });
+        }
 
         if owner.as_deref() == Some(meta.name.as_str()) {
             // Signed in to it already; only the record can be behind.
@@ -179,7 +347,15 @@ impl<H: Host> Engine<H> {
         if let Some(current) = &current {
             match &owner {
                 Some(owner) => {
-                    vault::store(&self.host, &vault_id(pid, owner), &current.blob)?;
+                    let id = vault_id(pid, owner);
+                    let parked = if misrecorded {
+                        // Its record names someone else: parked with the
+                        // owner's own record, as last parked.
+                        claude_code::with_record_of(&current.blob, &vault::load(&self.host, &id)?)?
+                    } else {
+                        current.blob.clone()
+                    };
+                    vault::store(&self.host, &id, &parked)?;
                     if let Some(owner_meta) = state
                         .accounts
                         .iter_mut()
@@ -211,6 +387,8 @@ impl<H: Host> Engine<H> {
             }
             return Err(e);
         }
+        // The login checked is gone; this one is the account's own.
+        let _ = live::forget_check(&self.host, pid);
         Ok(SwitchOutcome::Switched {
             provider: pid,
             name: meta.name,
@@ -284,7 +462,7 @@ impl<H: Host> Engine<H> {
             });
         }
 
-        let current = prov.read_active(&self.host)?;
+        let current = self.read_live(pid)?.map(|login| login.current);
         let in_use = current
             .as_ref()
             .and_then(|c| live::owner(&state, pid, &c.details))
@@ -304,6 +482,7 @@ impl<H: Host> Engine<H> {
                 return Err(e);
             }
             state.active.insert(pid.as_str().into(), meta.name.clone());
+            let _ = live::forget_check(&self.host, pid);
         }
         if let Some(account) = state
             .accounts
@@ -385,9 +564,22 @@ impl<H: Host> Engine<H> {
     /// Best-effort usage for every account of both tools. The account that
     /// owns a tool's live login is read with the live token, since its parked
     /// copy may be stale; every other account with its vault copy. Requests
-    /// run in parallel. Reading changes nothing; see [`Engine::record_plans`].
+    /// run in parallel. A parked Claude Code token is first asked whose it
+    /// is, once each time it changes: one found to be another account's is
+    /// [`UsageReport::Unauthorized`], so it asks for a new sign-in and never
+    /// shows someone else's numbers. Reading changes no login or account
+    /// (only the checks of whose Claude Code's tokens are); see
+    /// [`Engine::record_plans`].
     pub fn usage(&self, api: &dyn UsageApi) -> Result<Vec<AccountUsage>> {
         let state = State::load(&self.host)?;
+        // Whose token Claude Code holds decides whose numbers it reads.
+        if state
+            .accounts
+            .iter()
+            .any(|a| a.provider == ProviderId::ClaudeCode)
+        {
+            self.check_live(api);
+        }
         let now = now_epoch() as i64;
 
         // Each tool's live login and the account it belongs to. A login that
@@ -397,14 +589,21 @@ impl<H: Host> Engine<H> {
             if !state.accounts.iter().any(|a| a.provider == pid) {
                 continue;
             }
-            if let Ok(Some(current)) = provider_for(pid).read_active(&self.host) {
+            if let Ok(Some(LiveLogin { current, .. })) = self.read_live(pid) {
                 if let Some(owner) = live::owner(&state, pid, &current.details) {
                     live_logins.push((pid, owner, current.blob));
                 }
             }
         }
 
-        let requests: Vec<(&AccountMeta, std::result::Result<Request, UsageReport>)> = state
+        // Each account's request, with the last check of whose its token is
+        // for a parked Claude Code login (`Some(None)`: never checked).
+        type Planned<'a> = (
+            &'a AccountMeta,
+            std::result::Result<Request, UsageReport>,
+            Option<Option<live::Checked>>,
+        );
+        let requests: Vec<Planned> = state
             .accounts
             .iter()
             .map(|a| {
@@ -416,35 +615,60 @@ impl<H: Host> Engine<H> {
                     None => vault::load(&self.host, &vault_id(a.provider, &a.name))
                         .map_err(|e| UsageReport::Failed(e.to_string())),
                 };
+                let parked_claude = live.is_none() && a.provider == ProviderId::ClaudeCode;
                 (
                     a,
                     blob.and_then(|blob| Request::for_blob(a.provider, &blob, now)),
+                    parked_claude.then(|| live::parked_check(&self.host, a.provider, &a.name)),
                 )
             })
             .collect();
 
-        let read: Vec<AccountUsage> = std::thread::scope(|scope| {
-            let handles: Vec<_> = requests
-                .into_iter()
-                .map(|(meta, request)| {
-                    let handle = request.map(|request| scope.spawn(move || request.send(api)));
-                    (meta, handle)
-                })
-                .collect();
-            handles
-                .into_iter()
-                .map(|(meta, handle)| AccountUsage {
-                    provider: meta.provider,
-                    name: meta.name.clone(),
-                    report: match handle {
-                        Ok(h) => h
-                            .join()
-                            .unwrap_or_else(|_| UsageReport::Failed("request panicked".into())),
-                        Err(report) => report,
-                    },
-                })
-                .collect()
-        });
+        let (read, found): (Vec<AccountUsage>, Vec<Option<(String, live::Checked)>>) =
+            std::thread::scope(|scope| {
+                let handles: Vec<_> = requests
+                    .into_iter()
+                    .map(|(meta, request, check)| {
+                        let handle = request.map(|request| {
+                            scope.spawn(move || match check {
+                                Some(last) => vetted(meta, request, last, api),
+                                None => (request.send(api), None),
+                            })
+                        });
+                        (meta, handle)
+                    })
+                    .collect();
+                handles
+                    .into_iter()
+                    .map(|(meta, handle)| {
+                        let (report, found) = match handle {
+                            Ok(h) => h.join().unwrap_or_else(|_| {
+                                (UsageReport::Failed("request panicked".into()), None)
+                            }),
+                            Err(report) => (report, None),
+                        };
+                        let usage = AccountUsage {
+                            provider: meta.provider,
+                            name: meta.name.clone(),
+                            report,
+                        };
+                        (usage, found.map(|check| (meta.name.clone(), check)))
+                    })
+                    .unzip()
+            });
+        let claude: Vec<&str> = state
+            .accounts
+            .iter()
+            .filter(|a| a.provider == ProviderId::ClaudeCode)
+            .map(|a| a.name.as_str())
+            .collect();
+        // Best effort: a check not kept is asked again next time.
+        let _ = live::record_parked_checks(
+            &self.host,
+            ProviderId::ClaudeCode,
+            found.into_iter().flatten().collect(),
+            &claude,
+        );
         Ok(read)
     }
 
@@ -468,22 +692,46 @@ impl<H: Host> Engine<H> {
     ) -> Result<Vec<(String, Renewal)>> {
         let provider = ProviderId::ClaudeCode;
         let state = State::load(&self.host)?;
-        let (in_use, live_chain) = match provider_for(provider).read_active(&self.host)? {
-            Some(current) => (
-                live::owner(&state, provider, &current.details),
-                usage::claude_refresh_token(&current.blob),
-            ),
-            None => (None, None),
-        };
+        // Whose token Claude Code holds, not its record, is the one in use: a
+        // record another app rewrote would leave the real one to be renewed.
+        self.check_live(api);
+        let live = self.read_live_signed_in(provider)?;
+        let live_chain = live
+            .as_ref()
+            .and_then(|login| usage::claude_refresh_token(&login.current.blob));
+        let parked: Vec<(&AccountMeta, Vec<u8>)> = state
+            .accounts
+            .iter()
+            .filter(|a| a.provider == provider)
+            .filter_map(|a| {
+                Some((
+                    a,
+                    vault::load(&self.host, &vault_id(provider, &a.name)).ok()?,
+                ))
+            })
+            .collect();
+        let mut in_use: Vec<String> = Vec::new();
+        if let Some(login) = &live {
+            in_use.extend(live::owner(&state, provider, &login.current.details));
+            // Unchecked, and its chain in no parked copy to say whose it is:
+            // its record may have been rewritten by another app, so the
+            // account it names and the one put in use may each be in use,
+            // their parked copies Claude Code's old chain.
+            let chain_parked = live_chain.is_some()
+                && parked
+                    .iter()
+                    .any(|(_, blob)| usage::claude_refresh_token(blob) == live_chain);
+            if !login.verified && !chain_parked {
+                in_use.extend(live::owner(&state, provider, &login.record));
+                in_use.extend(state.active_name(provider).cloned());
+            }
+        }
         let mut renewed = Vec::new();
-        for meta in state.accounts.iter().filter(|a| a.provider == provider) {
-            if in_use.as_deref() == Some(meta.name.as_str()) || !wanted(&meta.name) {
+        for (meta, blob) in parked {
+            if in_use.contains(&meta.name) || !wanted(&meta.name) {
                 continue;
             }
             let id = vault_id(provider, &meta.name);
-            let Ok(blob) = vault::load(&self.host, &id) else {
-                continue;
-            };
             if live_chain.is_some() && usage::claude_refresh_token(&blob) == live_chain {
                 continue;
             }
@@ -549,6 +797,22 @@ impl<H: Host> Engine<H> {
             let _ = state.save(&self.host);
         }
     }
+}
+
+/// A tool's live login as [`Engine::read_live`] finds it. Deliberately not
+/// `Debug`: it holds the login.
+struct LiveLogin {
+    /// Its details those of the account the last check found the token to be.
+    current: ActiveCredential,
+    /// The login's own record, where that check found the token to be
+    /// someone else's.
+    misrecorded: Option<Details>,
+    /// Whether a check of this very token says whose it is, not the record
+    /// (nor a check of the token it renewed). Always, for a tool whose login
+    /// itself says whose it is.
+    verified: bool,
+    /// The login's own details, before any check.
+    record: Details,
 }
 
 /// One usage request, with the token it carries. Deliberately not `Debug`.
@@ -618,6 +882,52 @@ impl Request {
             Request::Known(report) => report,
         }
     }
+}
+
+/// The read of `meta`'s parked Claude Code login, unless its token is found
+/// to be another account's: Anthropic is asked whose it is once per token,
+/// `last` being the last answer. A new answer comes back to be kept; none
+/// (Anthropic out of reach) leaves the read to go ahead.
+fn vetted(
+    meta: &AccountMeta,
+    request: Request,
+    last: Option<live::Checked>,
+    api: &dyn UsageApi,
+) -> (UsageReport, Option<live::Checked>) {
+    let Request::Claude(token) = &request else {
+        return (request.send(api), None);
+    };
+    let print = live::fingerprint(token);
+    let (check, new) = match last.filter(|c| c.token == print) {
+        Some(known) => (Some(known), false),
+        None => {
+            let asked = api
+                .claude_profile(token)
+                .ok()
+                .and_then(|profile| usage::profile_owner(&profile))
+                .map(|(identity, label)| live::Checked {
+                    token: print,
+                    identity,
+                    label,
+                    recorded: None,
+                });
+            (asked, true)
+        }
+    };
+    let someone_else = check.as_ref().is_some_and(|c| {
+        let found = Details {
+            label: c.label.clone(),
+            identity: Some(c.identity.clone()),
+            plan: None,
+        };
+        live::is_someone_else(&found, meta)
+    });
+    let report = if someone_else {
+        UsageReport::Unauthorized
+    } else {
+        request.send(api)
+    };
+    (report, check.filter(|_| new))
 }
 
 fn validate_name(name: &str) -> Result<()> {
@@ -748,7 +1058,8 @@ mod tests {
             engine.live(ProviderId::ClaudeCode).unwrap(),
             Live::Unmanaged {
                 label: Some("a@x.com".into()),
-                plan: None
+                plan: None,
+                recorded: None,
             }
         );
 
@@ -763,7 +1074,8 @@ mod tests {
             engine.live(ProviderId::ClaudeCode).unwrap(),
             Live::Unmanaged {
                 label: Some("b@x.com".into()),
-                plan: None
+                plan: None,
+                recorded: None,
             }
         );
     }
@@ -945,6 +1257,8 @@ mod tests {
         let engine = work_and_personal();
         // personal signed in with the tool itself; the state still says work
         sign_in_as(engine.host(), "SECRET-TOKEN-B-FRESH", "b@x.com");
+        // as the app and the command line do before a switch
+        engine.check_live(&FakeApi::new().with_owner("SECRET-TOKEN-B-FRESH", "b@x.com"));
         engine.switch("work", None).unwrap();
         assert!(active_token(engine.host()).contains(TOKEN_A));
         assert!(parked(&engine, "personal").contains("SECRET-TOKEN-B-FRESH"));
@@ -954,7 +1268,8 @@ mod tests {
     #[test]
     fn switch_never_parks_an_unmanaged_login_in_another_accounts_place() {
         let engine = work_and_personal();
-        sign_in_as(engine.host(), "SECRET-TOKEN-CCC", "c@x.com");
+        sign_in_as(engine.host(), TOKEN_C, "c@x.com");
+        engine.check_live(&FakeApi::new().with_owner(TOKEN_C, "c@x.com"));
         let outcome = engine.switch("personal", None).unwrap();
         assert_eq!(
             outcome,
@@ -974,7 +1289,8 @@ mod tests {
     #[test]
     fn a_careful_switch_asks_before_replacing_an_unmanaged_login() {
         let engine = work_and_personal();
-        sign_in_as(engine.host(), "SECRET-TOKEN-CCC", "c@x.com");
+        sign_in_as(engine.host(), TOKEN_C, "c@x.com");
+        engine.check_live(&FakeApi::new().with_owner(TOKEN_C, "c@x.com"));
         assert_eq!(
             engine.switch_keeping_unmanaged("personal", None).unwrap(),
             SwitchOutcome::WouldReplace(UnmanagedLogin {
@@ -1024,6 +1340,7 @@ mod tests {
     fn switch_to_the_account_already_signed_in_only_corrects_the_record() {
         let engine = work_and_personal();
         sign_in_as(engine.host(), TOKEN_B, "b@x.com");
+        engine.check_live(&FakeApi::new());
         assert_eq!(
             engine.switch("personal", None).unwrap(),
             SwitchOutcome::AlreadyActive
@@ -1330,17 +1647,51 @@ mod tests {
 
     struct FakeApi {
         seen: std::sync::Mutex<Vec<String>>,
+        /// The tokens asked whose they are.
+        profiled: std::sync::Mutex<Vec<String>>,
+        /// Whose each token is, by email; one not here gets no answer.
+        owners: Vec<(&'static str, &'static str)>,
     }
 
     impl FakeApi {
         fn new() -> Self {
             Self {
                 seen: std::sync::Mutex::new(Vec::new()),
+                profiled: std::sync::Mutex::new(Vec::new()),
+                owners: vec![
+                    (TOKEN_A, "a@x.com"),
+                    (TOKEN_B, "b@x.com"),
+                    ("SECRET-TOKEN-B2", "b@x.com"),
+                ],
             }
+        }
+
+        /// One where `token` is `email`'s, whatever the login's record says.
+        fn with_owner(mut self, token: &'static str, email: &'static str) -> Self {
+            self.owners.retain(|(t, _)| *t != token);
+            self.owners.push((token, email));
+            self
         }
     }
 
     impl UsageApi for FakeApi {
+        /// Shaped as Anthropic answers, with the identity `config` records.
+        fn claude_profile(
+            &self,
+            token: &str,
+        ) -> std::result::Result<serde_json::Value, usage::FetchError> {
+            self.profiled.lock().unwrap().push(token.to_owned());
+            let (_, email) = self
+                .owners
+                .iter()
+                .find(|(t, _)| *t == token)
+                .ok_or_else(|| usage::FetchError::Other("no answer".into()))?;
+            Ok(serde_json::json!({
+                "account": {"uuid": format!("uuid-{email}"), "email": email},
+                "organization": {"uuid": "org-1", "name": "Org"}
+            }))
+        }
+
         fn claude(&self, token: &str) -> std::result::Result<serde_json::Value, usage::FetchError> {
             self.seen.lock().unwrap().push(token.to_owned());
             match token {
@@ -1527,6 +1878,32 @@ mod tests {
     }
 
     #[test]
+    fn the_account_whose_token_claude_code_holds_is_never_renewed_whatever_its_record_says() {
+        let engine = parked_and_in_use_lapsed("SECRET-RT-A");
+        // Claude Code renewed personal's login, and another app signed in to
+        // work (the Claude desktop app, sharing ~/.claude.json) rewrote the
+        // record to work's. The parked copy of personal is the old chain.
+        let later = now_epoch() as i64 + 3_600;
+        engine.host().put_file(
+            ClaudeCode::credentials_path(engine.host()),
+            lapsing_creds("SECRET-TOKEN-B2", "SECRET-RT-B2", later),
+        );
+        engine
+            .host()
+            .put_file(ClaudeCode::config_path(engine.host()), config("a@x.com"));
+
+        let api = FakeApi::new();
+        let renewed = engine.renew_parked(&api, &|_| true).unwrap();
+
+        assert_eq!(renewed, [("work".to_owned(), Renewal::Renewed)]);
+        assert_eq!(api.seen.lock().unwrap().as_slice(), ["renew|SECRET-RT-A"]);
+        assert_eq!(
+            engine.live(ProviderId::ClaudeCode).unwrap(),
+            Live::Account("personal".into())
+        );
+    }
+
+    #[test]
     fn a_lapsed_login_with_nothing_to_renew_it_needs_signing_in_again() {
         let lapsed = now_epoch() as i64 - 3_600;
         let host = FakeHost::new();
@@ -1682,6 +2059,400 @@ mod tests {
         let all = engine.usage(&FakeApi::new()).unwrap();
         assert_eq!(five_hour(report_for(&all, "personal")), 20.0);
         assert_eq!(five_hour(report_for(&all, "work")), 10.0);
+    }
+
+    // ---- a token whose record names someone else
+
+    const TOKEN_C: &str = "SECRET-TOKEN-CCC";
+
+    /// What was seen on a Mac (2026-10): something signed Claude Code in to
+    /// another account and rewrote only the token; `~/.claude.json` still
+    /// names `work`.
+    fn token_replaced_under_works_record(token: &str) -> Engine<FakeHost> {
+        let engine = work_and_personal();
+        engine
+            .host()
+            .put_file(ClaudeCode::credentials_path(engine.host()), creds(token));
+        engine
+    }
+
+    #[test]
+    fn a_token_found_to_be_someone_elses_is_not_read_as_the_recorded_account() {
+        let engine = token_replaced_under_works_record(TOKEN_C);
+        let api = FakeApi::new().with_owner(TOKEN_C, "c@x.com");
+
+        let all = engine.usage(&api).unwrap();
+        // work is read with its own parked token, not with c's
+        assert_eq!(five_hour(report_for(&all, "work")), 10.0);
+        assert!(!api.seen.lock().unwrap().iter().any(|t| t == TOKEN_C));
+        assert_eq!(
+            engine.live(ProviderId::ClaudeCode).unwrap(),
+            Live::Unmanaged {
+                label: Some("c@x.com".into()),
+                plan: None,
+                recorded: Some("a@x.com".into()),
+            }
+        );
+        // asked once for this token, not on every read
+        engine.usage(&api).unwrap();
+        let asked = api.profiled.lock().unwrap();
+        assert_eq!(asked.iter().filter(|t| *t == TOKEN_C).count(), 1);
+        let kept = String::from_utf8(
+            engine
+                .host()
+                .file(&live::checked_path(engine.host()))
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(!kept.contains(TOKEN_C));
+    }
+
+    #[test]
+    fn a_token_found_to_be_someone_elses_is_never_parked_as_the_recorded_account() {
+        let engine = token_replaced_under_works_record(TOKEN_C);
+        engine.check_live(&FakeApi::new().with_owner(TOKEN_C, "c@x.com"));
+
+        assert_eq!(
+            engine.switch_keeping_unmanaged("personal", None).unwrap(),
+            SwitchOutcome::WouldReplace(UnmanagedLogin {
+                label: Some("c@x.com".into())
+            })
+        );
+        assert!(matches!(
+            engine.enroll(ProviderId::ClaudeCode, "third"),
+            Err(Error::Misrecorded { label, recorded, .. })
+                if label.as_deref() == Some("c@x.com") && recorded.as_deref() == Some("a@x.com")
+        ));
+        engine.switch("personal", None).unwrap();
+        assert!(parked(&engine, "work").contains(TOKEN_A));
+        assert!(!parked(&engine, "work").contains(TOKEN_C));
+        // what was found of c's login doesn't stick to work's own
+        engine.switch("work", None).unwrap();
+        assert_eq!(
+            engine.live(ProviderId::ClaudeCode).unwrap(),
+            Live::Account("work".into())
+        );
+    }
+
+    #[test]
+    fn a_token_claude_code_renews_under_the_same_wrong_record_stays_someone_elses() {
+        let engine = token_replaced_under_works_record(TOKEN_C);
+        engine.check_live(&FakeApi::new().with_owner(TOKEN_C, "c@x.com"));
+        // renewed, and Anthropic can't be asked right now
+        engine.host().put_file(
+            ClaudeCode::credentials_path(engine.host()),
+            creds("SECRET-TOKEN-C2"),
+        );
+        let api = FakeApi::new();
+        let all = engine.usage(&api).unwrap();
+        assert!(matches!(
+            engine.live(ProviderId::ClaudeCode).unwrap(),
+            Live::Unmanaged { label, recorded, .. }
+                if label.as_deref() == Some("c@x.com") && recorded.as_deref() == Some("a@x.com")
+        ));
+        assert_eq!(five_hour(report_for(&all, "work")), 10.0);
+        assert!(!api
+            .seen
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|t| t == "SECRET-TOKEN-C2"));
+    }
+
+    #[test]
+    fn a_lapsed_token_is_not_asked_about() {
+        let engine = work_and_personal();
+        engine.host().put_file(
+            ClaudeCode::credentials_path(engine.host()),
+            r#"{"claudeAiOauth":{"accessToken":"SECRET-OLD","expiresAt":1000}}"#,
+        );
+        let api = FakeApi::new();
+        engine.check_live(&api);
+        assert!(api.profiled.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_token_found_to_be_another_accounts_parks_with_that_accounts_record() {
+        let engine = token_replaced_under_works_record("SECRET-TOKEN-B2");
+        engine.check_live(&FakeApi::new());
+        assert_eq!(
+            engine.live(ProviderId::ClaudeCode).unwrap(),
+            Live::Account("personal".into())
+        );
+
+        engine.switch("work", None).unwrap();
+        let personal = parked(&engine, "personal");
+        assert!(personal.contains("SECRET-TOKEN-B2"));
+        assert!(personal.contains("b@x.com") && !personal.contains("a@x.com"));
+        // and switching back brings back both halves of personal's login
+        engine.switch("personal", None).unwrap();
+        let config = engine
+            .host()
+            .file(&ClaudeCode::config_path(engine.host()))
+            .unwrap();
+        assert!(String::from_utf8(config).unwrap().contains("b@x.com"));
+        assert!(active_token(engine.host()).contains("SECRET-TOKEN-B2"));
+    }
+
+    #[test]
+    fn a_check_with_no_answer_leaves_the_record_to_say_whose_the_login_is() {
+        let engine = token_replaced_under_works_record(TOKEN_C);
+        // FakeApi doesn't know TOKEN_C
+        let all = engine.usage(&FakeApi::new()).unwrap();
+        assert_eq!(
+            engine.live(ProviderId::ClaudeCode).unwrap(),
+            Live::Account("work".into())
+        );
+        assert_eq!(report_for(&all, "work"), &UsageReport::Unauthorized);
+    }
+
+    /// What was seen on a Mac (2026-11): `work` in use, and the Claude
+    /// desktop app, signed in to `personal`, rewrote `~/.claude.json` to
+    /// name it; the token is still work's.
+    fn record_rewritten_to_personal() -> Engine<FakeHost> {
+        let engine = work_and_personal();
+        engine
+            .host()
+            .put_file(ClaudeCode::config_path(engine.host()), config("b@x.com"));
+        engine
+    }
+
+    #[test]
+    fn a_switch_waits_while_a_record_naming_another_account_cant_be_checked() {
+        let engine = record_rewritten_to_personal();
+        // Anthropic out of reach: only the record says whose the login is
+        let api_down = FakeApi {
+            owners: Vec::new(),
+            ..FakeApi::new()
+        };
+        engine.check_live(&api_down);
+
+        for name in ["personal", "work"] {
+            assert!(matches!(
+                engine.switch(name, None),
+                Err(Error::Unverified { .. })
+            ));
+        }
+        // nothing moved: work's token stays put, and nobody's parked copy changed
+        assert!(active_token(engine.host()).contains(TOKEN_A));
+        assert!(parked(&engine, "personal").contains(TOKEN_B));
+        assert_eq!(
+            engine.state().unwrap().active_name(ProviderId::ClaudeCode),
+            Some(&"work".to_owned())
+        );
+
+        // once Anthropic says the token is work's, the switch parks it there
+        engine.check_live(&FakeApi::new());
+        engine.switch("personal", None).unwrap();
+        let work = parked(&engine, "work");
+        assert!(work.contains(TOKEN_A) && work.contains("a@x.com") && !work.contains("b@x.com"));
+        assert!(active_token(engine.host()).contains(TOKEN_B));
+    }
+
+    #[test]
+    fn a_record_agreeing_with_the_account_in_use_needs_no_check_to_switch() {
+        let engine = work_and_personal();
+        let api_down = FakeApi {
+            owners: Vec::new(),
+            ..FakeApi::new()
+        };
+        engine.check_live(&api_down);
+        engine.switch("personal", None).unwrap();
+        assert!(parked(&engine, "work").contains(TOKEN_A));
+        assert!(active_token(engine.host()).contains(TOKEN_B));
+    }
+
+    #[test]
+    fn a_login_claude_code_signed_out_of_is_neither_parked_nor_in_the_way() {
+        let engine = record_rewritten_to_personal();
+        // Claude Code blanked work's login after a refused renewal
+        engine.host().put_file(
+            ClaudeCode::credentials_path(engine.host()),
+            r#"{"claudeAiOauth":{"accessToken":"","refreshToken":"","expiresAt":0}}"#,
+        );
+        assert!(matches!(
+            engine.switch("personal", None).unwrap(),
+            SwitchOutcome::Switched { replaced: None, .. }
+        ));
+        // nobody's parked login was overwritten with the blank one
+        assert!(parked(&engine, "work").contains(TOKEN_A));
+        assert!(parked(&engine, "personal").contains(TOKEN_B));
+        assert!(active_token(engine.host()).contains(TOKEN_B));
+    }
+
+    #[test]
+    fn after_a_login_offline_a_check_of_an_older_token_decides_no_switch() {
+        let engine = record_rewritten_to_personal();
+        // work's token, checked under the desktop app's record
+        engine.check_live(&FakeApi::new());
+        // then `/login` to personal, with Anthropic out of reach
+        sign_in_as(engine.host(), "SECRET-TOKEN-P9", "b@x.com");
+        let api_down = FakeApi {
+            owners: Vec::new(),
+            ..FakeApi::new()
+        };
+        engine.check_live(&api_down);
+        for name in ["work", "personal"] {
+            assert!(matches!(
+                engine.switch(name, None),
+                Err(Error::Unverified { .. })
+            ));
+        }
+        assert!(!parked(&engine, "work").contains("SECRET-TOKEN-P9"));
+
+        // asked, it parks under personal
+        engine.check_live(&FakeApi::new().with_owner("SECRET-TOKEN-P9", "b@x.com"));
+        engine.switch("work", None).unwrap();
+        assert!(parked(&engine, "personal").contains("SECRET-TOKEN-P9"));
+        assert!(!parked(&engine, "work").contains("SECRET-TOKEN-P9"));
+    }
+
+    #[test]
+    fn an_answer_about_a_token_a_switch_replaced_meanwhile_is_not_kept() {
+        let engine = record_rewritten_to_personal();
+        let asked_with = provider_for(ProviderId::ClaudeCode)
+            .read_active(engine.host())
+            .unwrap()
+            .unwrap()
+            .details;
+        // the user switched to personal while Anthropic was being asked
+        sign_in_as(engine.host(), TOKEN_B, "b@x.com");
+        engine.keep_check(
+            live::fingerprint(TOKEN_A),
+            &asked_with,
+            "uuid-a@x.com:org-1".into(),
+            Some("a@x.com".into()),
+        );
+        assert!(live::checked(engine.host(), ProviderId::ClaudeCode).is_none());
+        assert_eq!(
+            engine.live(ProviderId::ClaudeCode).unwrap(),
+            Live::Account("personal".into())
+        );
+    }
+
+    #[test]
+    fn an_unchecked_login_under_a_rewritten_record_renews_neither_account_it_may_be() {
+        let engine = parked_and_in_use_lapsed("SECRET-RT-DEAD");
+        engine.switch("work", None).unwrap();
+        // Claude Code renewed work's chain and went idle; the desktop app
+        // rewrote the record to personal. work's parked copy is the old chain.
+        let lapsed = now_epoch() as i64 - 60;
+        engine.host().put_file(
+            ClaudeCode::credentials_path(engine.host()),
+            lapsing_creds("SECRET-TOKEN-A2", "SECRET-RT-A2", lapsed),
+        );
+        engine
+            .host()
+            .put_file(ClaudeCode::config_path(engine.host()), config("b@x.com"));
+
+        let api = FakeApi::new();
+        let renewed = engine.renew_parked(&api, &|_| true).unwrap();
+        assert!(renewed.is_empty(), "{renewed:?}");
+        assert!(api.seen.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_renewed_token_of_someone_unmanaged_waits_to_be_asked_before_a_switch() {
+        let engine = token_replaced_under_works_record(TOKEN_C);
+        engine.check_live(&FakeApi::new().with_owner(TOKEN_C, "c@x.com"));
+        // Claude Code renewed c's login, still under work's record, offline
+        engine.host().put_file(
+            ClaudeCode::credentials_path(engine.host()),
+            creds("SECRET-TOKEN-C2"),
+        );
+        let api_down = FakeApi {
+            owners: Vec::new(),
+            ..FakeApi::new()
+        };
+        engine.check_live(&api_down);
+        assert!(matches!(
+            engine.switch("personal", None),
+            Err(Error::Unverified { .. })
+        ));
+        assert!(!parked(&engine, "work").contains("SECRET-TOKEN-C2"));
+
+        // asked, it is c's: replaced, never parked under work
+        engine.check_live(&FakeApi::new().with_owner("SECRET-TOKEN-C2", "c@x.com"));
+        assert!(matches!(
+            engine.switch("personal", None).unwrap(),
+            SwitchOutcome::Switched {
+                replaced: Some(_),
+                ..
+            }
+        ));
+        assert!(!parked(&engine, "work").contains("SECRET-TOKEN-C2"));
+        assert!(parked(&engine, "work").contains(TOKEN_A));
+    }
+
+    /// `personal`'s parked login holding `token` under personal's own record.
+    fn parked_as_personal(engine: &Engine<FakeHost>, token: &str) {
+        let blob = serde_json::json!({
+            "credentials": creds(token),
+            "oauth_account": {
+                "emailAddress": "b@x.com",
+                "accountUuid": "uuid-b@x.com",
+                "organizationUuid": "org-1"
+            }
+        });
+        vault::store(
+            engine.host(),
+            &vault_id(ProviderId::ClaudeCode, "personal"),
+            &serde_json::to_vec(&blob).unwrap(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_parked_login_found_to_be_someone_elses_asks_for_a_sign_in_and_shows_none_of_their_numbers()
+    {
+        let engine = work_and_personal();
+        // c's login, parked under personal by an older version
+        parked_as_personal(&engine, TOKEN_C);
+        let api = FakeApi::new().with_owner(TOKEN_C, "c@x.com");
+
+        let all = engine.usage(&api).unwrap();
+        assert_eq!(report_for(&all, "personal"), &UsageReport::Unauthorized);
+        assert_eq!(five_hour(report_for(&all, "work")), 10.0);
+        assert!(!api.seen.lock().unwrap().iter().any(|t| t == TOKEN_C));
+
+        // asked once per token, and only a fingerprint is kept
+        engine.usage(&api).unwrap();
+        let asked = api.profiled.lock().unwrap().clone();
+        assert_eq!(asked.iter().filter(|t| *t == TOKEN_C).count(), 1);
+        let kept = engine
+            .host()
+            .file(&live::checked_path(engine.host()))
+            .unwrap();
+        assert!(!String::from_utf8(kept).unwrap().contains(TOKEN_C));
+
+        // signed in again, personal's own login reads as before
+        parked_as_personal(&engine, "SECRET-TOKEN-B2");
+        let all = engine.usage(&api).unwrap();
+        assert_eq!(five_hour(report_for(&all, "personal")), 20.0);
+    }
+
+    #[test]
+    fn a_parked_login_whose_owner_cant_be_asked_is_read_as_before() {
+        let engine = work_and_personal();
+        parked_as_personal(&engine, "SECRET-TOKEN-B2");
+        let api_down = FakeApi {
+            owners: Vec::new(),
+            ..FakeApi::new()
+        };
+        let all = engine.usage(&api_down).unwrap();
+        assert_eq!(five_hour(report_for(&all, "personal")), 20.0);
+        // nothing kept: asked again next time
+        assert!(live::parked_check(engine.host(), ProviderId::ClaudeCode, "personal").is_none());
+    }
+
+    #[test]
+    fn a_forgotten_accounts_parked_check_goes_with_it() {
+        let engine = work_and_personal();
+        engine.usage(&FakeApi::new()).unwrap();
+        assert!(live::parked_check(engine.host(), ProviderId::ClaudeCode, "personal").is_some());
+        engine.remove("personal", None).unwrap();
+        engine.usage(&FakeApi::new()).unwrap();
+        assert!(live::parked_check(engine.host(), ProviderId::ClaudeCode, "personal").is_none());
     }
 
     // ---- editors
