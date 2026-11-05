@@ -15,7 +15,7 @@ dirs = "7"
 ureq = "3"
 sha2 = "0.11"
 # Editors (Cursor, Antigravity) keep their login in SQLite; bundled, so no system library is needed.
-rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
 
 [target.'cfg(windows)'.dependencies]
 # Where a Microsoft Store app is installed (the Codex app carries `codex`).
