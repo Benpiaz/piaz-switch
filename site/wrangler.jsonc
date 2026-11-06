@@ -1,0 +1,11 @@
+{
+  "name": "piaz-switch",
+  "compatibility_date": "2026-11-01",
+  // Plain static site: this folder is served as-is.
+  // Headers from vercel.json are mirrored in _headers.
+  "assets": {
+    "directory": ".",
+    "html_handling": "drop-trailing-slash",
+    "not_found_handling": "404-page"
+  }
+}

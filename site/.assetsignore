@@ -1,0 +1,6 @@
+wrangler.jsonc
+vercel.json
+.vercel
+.gitignore
+.assetsignore
+.wrangler
