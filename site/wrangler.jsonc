@@ -1,0 +1,8 @@
+// The download page, served as static files by Cloudflare Workers.
+// Deploy: cd site && npx wrangler deploy
+{
+  "name": "piaz-switch",
+  "compatibility_date": "2026-11-01",
+  "assets": { "directory": "." },
+  "routes": [{ "pattern": "openvibecode.dev", "custom_domain": true }]
+}

@@ -13,7 +13,7 @@ click — without signing out — and see how much each account has left.**
 [![License: MIT + Commons Clause](https://img.shields.io/badge/license-MIT%20%2B%20Commons%20Clause-blue.svg)](LICENSE)
 ![Windows | macOS](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-lightgrey)
 
-**[piaz-switch.vercel.app](https://piaz-switch.vercel.app)** · [**Download**](#download) · [What's new](CHANGELOG.md) · [How it works](#how-it-works) · [Use the app](#use-the-app) · [Command line](#use-the-command-line) · [Author](#author) · [Tiếng Việt](#tiếng-việt)
+**[openvibecode.dev](https://openvibecode.dev)** · [**Download**](#download) · [What's new](CHANGELOG.md) · [How it works](#how-it-works) · [Use the app](#use-the-app) · [Command line](#use-the-command-line) · [Author](#author) · [Tiếng Việt](#tiếng-việt)
 
 Made by **Ben Piaz** · [YouTube @benpiaz](https://www.youtube.com/@benpiaz) · [X @benpiazai](https://x.com/benpiazai)
 
@@ -375,7 +375,7 @@ products with AI:
 
 - YouTube: [@benpiaz](https://www.youtube.com/@benpiaz)
 - X: [@benpiazai](https://x.com/benpiazai)
-- Website: [piaz-switch.vercel.app](https://piaz-switch.vercel.app)
+- Website: [openvibecode.dev](https://openvibecode.dev)
 - Source: [github.com/Benpiaz/piaz-switch](https://github.com/Benpiaz/piaz-switch)
 
 The same links are in the app, under **Settings → About** and in the tray menu.
@@ -456,7 +456,7 @@ còn bao nhiêu hạn mức (5 giờ, tuần, tháng, theo model).
 
 Xem [Có gì mới](CHANGELOG.md) (tiếng Anh) ở từng phiên bản.
 
-**Tải về** tại trang [piaz-switch.vercel.app](https://piaz-switch.vercel.app) hoặc ở mục [Download](#download) phía trên:
+**Tải về** tại trang [openvibecode.dev](https://openvibecode.dev) hoặc ở mục [Download](#download) phía trên:
 
 - **Windows**: tải `PiazSwitch-windows-x64-setup.exe` và chạy để cài. Nếu Windows
   hiện "Windows protected your PC", bấm **More info → Run anyway** (app chưa có chữ

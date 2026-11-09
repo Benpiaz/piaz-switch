@@ -11,7 +11,7 @@ pub const AUTHOR: &str = "Ben Piaz";
 
 /// Name, address; the tray lists them in this order.
 pub const LINKS: [(&str, &str); 4] = [
-    ("website", "https://piaz-switch.vercel.app"),
+    ("website", "https://openvibecode.dev"),
     ("repo", "https://github.com/Benpiaz/piaz-switch"),
     ("youtube", "https://www.youtube.com/@benpiaz"),
     ("x", "https://x.com/benpiazai"),
@@ -56,6 +56,7 @@ mod tests {
 
     #[test]
     fn only_named_links_open() {
+        assert_eq!(url("website"), Some("https://openvibecode.dev"));
         assert_eq!(url("youtube"), Some("https://www.youtube.com/@benpiaz"));
         assert_eq!(url("x"), Some("https://x.com/benpiazai"));
         assert_eq!(url("https://example.com"), None);
