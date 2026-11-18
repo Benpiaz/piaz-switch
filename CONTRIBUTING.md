@@ -62,6 +62,22 @@ key backed up: without it no installed app accepts another update, and a new key
 means everyone downloads the next version by hand. Without the secrets the release
 still builds, with a warning, but offers no update.
 
+The Mac builds are signed with a Developer ID certificate and notarized by Apple,
+so macOS opens them without a warning. That takes six more secrets, and a release
+without any of them stops at *Mac signing certificate*:
+
+- `APPLE_CERTIFICATE`: the Developer ID Application certificate with its private
+  key, as a `.p12`, base64 on one line (`openssl base64 -A -in developer-id.p12`).
+- `APPLE_CERTIFICATE_PASSWORD`: the `.p12`'s password.
+- `APPLE_SIGNING_IDENTITY`: the certificate's name,
+  `Developer ID Application: <name> (<team ID>)`.
+- `APPLE_TEAM_ID`: the 10-character team ID.
+- `APPLE_ID` and `APPLE_PASSWORD`: the Apple ID that notarizes, and an
+  app-specific password made for it at account.apple.com (not its real password).
+
+The certificate expires: renew it before then, from the same private key, and set
+the first two secrets again. Builds already notarized keep opening after it expires.
+
 ## macOS checklist (first run on a Mac)
 
 - [ ] `cargo test --workspace` — includes Unix-only file-permission tests

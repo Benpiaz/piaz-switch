@@ -7,6 +7,11 @@
 #   crates/pitstop-app/macos/bundle.sh target/release/pitstop-app
 #
 # Piaz Switch.app is written next to the binary, and its path printed.
+#
+# With MAC_SIGN_IDENTITY set (a "Developer ID Application: …" certificate in the
+# keychain) the app is signed for the hardened runtime, ready for Apple's
+# notarization; release.yml does that. Without it the signature is ad hoc and
+# only opens on the Mac it was built on.
 set -eu
 
 bin=${1:-target/release/pitstop-app}
@@ -36,10 +41,16 @@ cat >"$app/Contents/Info.plist" <<EOF
   <key>LSMinimumSystemVersion</key><string>11.0</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
+  <key>NSAppleEventsUsageDescription</key><string>Piaz Switch closes Cursor or Antigravity before it switches their account, so they reopen signed in to the new one.</string>
 </dict>
 </plist>
 EOF
 
-# An ad-hoc signature, so the keychain can remember "Always Allow" for it.
-codesign --force --deep --sign - "$app" >/dev/null 2>&1 || true
+if [ -n "${MAC_SIGN_IDENTITY:-}" ]; then
+  codesign --force --options runtime --timestamp \
+    --entitlements "$here/entitlements.plist" --sign "$MAC_SIGN_IDENTITY" "$app" >&2
+else
+  # An ad-hoc signature, so the keychain can remember "Always Allow" for it.
+  codesign --force --deep --sign - "$app" >/dev/null 2>&1 || true
+fi
 echo "$app"

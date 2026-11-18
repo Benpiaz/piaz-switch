@@ -5,6 +5,10 @@
 ### Changed
 - The download page moved to <https://openvibecode.dev>. Settings → About and the
   tray's Website link open it.
+- The macOS app is signed and notarized by Apple: it opens straight away, with no
+  "Apple could not verify…" block and no trip to Privacy & Security. After the
+  update macOS may ask once more for Keychain access, since the app's signature
+  changed; choose **Always Allow**.
 
 ## [0.6.1] - 2026-11-05
 

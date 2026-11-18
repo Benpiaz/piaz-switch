@@ -3,6 +3,9 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  # A trial run (Actions → Release → Run workflow): it builds, signs and
+  # notarizes everything and keeps the files on the run, but publishes nothing.
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -39,6 +42,7 @@ jobs:
       # The app reports the Cargo version and the updater compares it with the
       # tag's: a mismatch would offer the same update forever.
       - name: Tag matches the version
+        if: github.ref_type == 'tag'
         shell: bash
         run: |
           version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
@@ -59,6 +63,49 @@ jobs:
         if: runner.os == 'macOS'
         run: cargo build --release --workspace --target ${{ matrix.target }}
 
+      # Without a Developer ID signature and Apple's notarization, macOS refuses
+      # to open the app on any other Mac. The certificate (a .p12, base64) goes
+      # into a keychain of its own; Package signs with it (MAC_SIGN_IDENTITY) and
+      # sends the app, the CLI and the disk image to Apple. The six secrets are
+      # in "Releasing" in CONTRIBUTING.md.
+      - name: Mac signing certificate
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          missing=()
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_TEAM_ID APPLE_ID APPLE_PASSWORD; do
+            [[ -n "${!name}" ]] || missing+=("$name")
+          done
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            echo "::error::Missing ${missing[*]}: a Mac release has to be signed and notarized, or macOS won't open it."
+            exit 1
+          fi
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          password=$(openssl rand -hex 24)
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/signing.p12"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/signing.p12" -k "$keychain" -f pkcs12 \
+            -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/signing.p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          if ! security find-identity -v -p codesigning "$keychain" | grep -qF "\"$APPLE_SIGNING_IDENTITY\""; then
+            security find-identity -v -p codesigning "$keychain"
+            echo "::error::APPLE_SIGNING_IDENTITY is not the certificate's name."
+            exit 1
+          fi
+          echo "MAC_SIGN_IDENTITY=$APPLE_SIGNING_IDENTITY" >> "$GITHUB_ENV"
+
       - name: Package
         shell: bash
         env:
@@ -66,9 +113,26 @@ jobs:
           # release still builds, but the apps out there aren't offered it.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_ID: ${{ runner.os == 'macOS' && secrets.APPLE_ID || '' }}
+          APPLE_PASSWORD: ${{ runner.os == 'macOS' && secrets.APPLE_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ runner.os == 'macOS' && secrets.APPLE_TEAM_ID || '' }}
         run: |
           set -euo pipefail
           dir="target/${{ matrix.target }}/release"
+          # Sends a file to Apple and waits; on a refusal prints Apple's log and fails.
+          notarize() {
+            local result id
+            result=$(xcrun notarytool submit "$1" --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" \
+              --team-id "$APPLE_TEAM_ID" --wait --timeout 30m --output-format json) || true
+            echo "$result"
+            if [[ "$(jq -r '.status // empty' <<<"$result" || true)" != Accepted ]]; then
+              id=$(jq -r '.id // empty' <<<"$result" || true)
+              [[ -z "$id" ]] || xcrun notarytool log "$id" --apple-id "$APPLE_ID" \
+                --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" || true
+              echo "::error::Apple did not accept $1 (its answer is above)."
+              exit 1
+            fi
+          }
           mkdir dist
           if [[ "${{ runner.os }}" == "Windows" ]]; then
             cp "$dir"/bundle/nsis/*-setup.exe "dist/PiazSwitch-windows-${{ matrix.arch }}-setup.exe"
@@ -79,12 +143,31 @@ jobs:
             cp "$dir/piaz-switch.exe" README.md LICENSE "$name/"
             7z a "dist/$name.zip" "$name" >/dev/null
           else
+            app="$dir/Piaz Switch.app"
+            dmg="dist/PiazSwitch-macos-${{ matrix.arch }}.dmg"
             sh crates/pitstop-app/macos/bundle.sh "$dir/pitstop-app"
+            codesign --force --options runtime --timestamp --sign "$MAC_SIGN_IDENTITY" "$dir/piaz-switch"
+            codesign --verify --deep --strict --verbose=2 "$app"
+            codesign --display --verbose=2 "$app" 2>&1 | grep '^Authority=Developer ID Application'
+            codesign --display --entitlements - "$app" 2>&1 | grep -q com.apple.security.automation.apple-events
+            # Apple's ticket is stapled to the app itself, so it opens offline and
+            # the update archive below carries it too.
+            ditto -c -k --keepParent "$app" "$RUNNER_TEMP/app.zip"
+            notarize "$RUNNER_TEMP/app.zip"
+            xcrun stapler staple "$app"
+            xcrun stapler validate "$app"
             mkdir dmg
-            cp -R "$dir/Piaz Switch.app" dmg/
+            cp -R "$app" dmg/
             ln -s /Applications dmg/Applications
-            hdiutil create -volname "Piaz Switch" -srcfolder dmg -ov -format UDZO \
-              "dist/PiazSwitch-macos-${{ matrix.arch }}.dmg"
+            hdiutil create -volname "Piaz Switch" -srcfolder dmg -ov -format UDZO "$dmg"
+            codesign --force --timestamp --sign "$MAC_SIGN_IDENTITY" "$dmg"
+            notarize "$dmg"
+            xcrun stapler staple "$dmg"
+            xcrun stapler validate "$dmg"
+            # A bare binary can't hold a ticket: Gatekeeper asks Apple online.
+            ditto -c -k "$dir/piaz-switch" "$RUNNER_TEMP/cli.zip"
+            notarize "$RUNNER_TEMP/cli.zip"
+            spctl --assess --type execute --verbose=4 "$app" || true
             # What the updater installs: the app bundle alone, no ._ files.
             update="PiazSwitch-macos-${{ matrix.arch }}.app.tar.gz"
             COPYFILE_DISABLE=1 tar czf "dist/$update" -C "$dir" "Piaz Switch.app"
@@ -94,7 +177,9 @@ jobs:
             tar czf "dist/$name.tar.gz" "$name"
           fi
           cd dist
-          if [[ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]]; then
+          if [[ "$GITHUB_REF_TYPE" != tag ]]; then
+            echo "Trial run: $update is not signed for the updater."
+          elif [[ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]]; then
             # Bound to its version: the app (requireSignedVersion) refuses a
             # latest.json that pairs a newer number with an older signed file.
             npx --yes @tauri-apps/cli@^2 signer sign --app-version "${GITHUB_REF_NAME#v}" "$update"
@@ -114,6 +199,7 @@ jobs:
 
   release:
     needs: build
+    if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -141,7 +227,7 @@ jobs:
           | macOS 11+, Apple Silicon | `PiazSwitch-macos-arm64.dmg` |
           | macOS 11+, Intel | `PiazSwitch-macos-x64.dmg` |
 
-          The app is not code-signed yet. Windows: **More info → Run anyway**. macOS: open the app, click **Done** (not Move to Trash), then **System Settings → Privacy & Security → Open Anyway**. If it says the app "is damaged" or there is no Open Anyway button, run `xattr -dr com.apple.quarantine "/Applications/Piaz Switch.app"` in Terminal. Step by step: https://openvibecode.dev/#mac-open
+          The macOS app is signed and notarized by Apple, so it opens like any other app. The Windows build isn't code-signed yet: on the first install click **More info → Run anyway**.
           Each download has a `.sha256` checksum next to it. The `.sig` files and `latest.json` are for the app's own updater.
           EOF
           cat notes.md
