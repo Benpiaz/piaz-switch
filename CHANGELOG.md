@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-11-19
+
 ### Changed
 - The download page moved to <https://openvibecode.dev>. Settings → About and the
   tray's Website link open it.
