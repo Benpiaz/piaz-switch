@@ -15,7 +15,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        # macos-15, not macos-latest: since 2026-10 GitHub often finds no runner
+        # for the latest macOS image and cancels the job after 15 minutes.
+        os: [windows-latest, macos-15]
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
