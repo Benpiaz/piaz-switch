@@ -3,8 +3,10 @@
 Thanks for helping. Bug reports, ideas and pull requests are welcome — in English
 or Vietnamese.
 
-By contributing you agree that your contribution is licensed under this project's
-[license](LICENSE) (MIT with the Commons Clause).
+By contributing you agree to section 4 of this project's [license](LICENSE): you
+keep your copyright, and the project's owner may use, change, publish and license
+your contribution as part of Piaz Switch. The license lets you copy and change the
+source to prepare a pull request, not to publish a version of your own.
 
 ## Reporting a bug
 

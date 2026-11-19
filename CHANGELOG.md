@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+- New license, the [Piaz Switch License](LICENSE). Piaz Switch stays free to
+  download and use, at work too, and the source stays public to read, build and
+  change for your own use. Not allowed: selling it, cloning it into another
+  product (renamed or not, paid or free), or giving out copies. It replaces MIT
+  with the Commons Clause for everything published after 0.6.2; 0.6.2 and earlier
+  stay under the license they shipped with.
+
 ## [0.6.2] - 2026-11-19
 
 ### Changed

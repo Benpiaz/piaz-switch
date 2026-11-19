@@ -1,44 +1,94 @@
-"Commons Clause" License Condition v1.0
+Piaz Switch License
+Version 1.0
 
-The Software is provided to you by the Licensor under the License, as defined
-below, subject to the following condition.
+Copyright (c) 2026 Benpiaz. All rights reserved.
 
-Without limiting other conditions in the License, the grant of rights under the
-License will not include, and the License does not grant to you, the right to
-Sell the Software.
+Piaz Switch is free to use. It is not free to sell, and it is not free to copy
+into another product. The terms below say exactly what that means.
 
-For purposes of the foregoing, "Sell" means practicing any or all of the rights
-granted to you under the License to provide to third parties, for a fee or other
-consideration (including without limitation fees for hosting or consulting/
-support services related to the Software), a product or service whose value
-derives, entirely or substantially, from the functionality of the Software. Any
-license notice or attribution required by the License must also include this
-Commons Clause License Condition notice.
+1. Words used here
 
-Software: Piaz Switch (including the `piaz-switch` command line and libraries)
-License: MIT
-Licensor: Benpiaz
+"Software" means Piaz Switch: the desktop app, the `piaz-switch` command line,
+the libraries, and the source code, documentation, designs and other files
+published with them, in any form, in whole or in part.
 
--------------------------------------------------------------------------------
+"Licensor" means Benpiaz, the copyright holder.
 
-MIT License
+"You" means the person or organization using the Software.
 
-Copyright (c) 2026 Benpiaz
+2. What you may do
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+As long as you keep to section 3, the Licensor gives you a free, worldwide,
+non-exclusive, non-transferable permission to:
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+  a. download, install and run the Software, for yourself or inside your
+     company or organization, including for paid work that you do with its
+     help;
+
+  b. read the source code, build the Software from it, and change it for your
+     own use under (a);
+
+  c. copy or fork the source code where the Licensor publishes it, in order to
+     prepare and send changes to the Licensor (for example a pull request).
+
+3. What you may not do
+
+You may not do any of the following, or help or allow anyone else to:
+
+  a. Sell the Software. That means: sell, resell, rent, lease, license or
+     otherwise ask for or take money or anything else of value for the
+     Software, for a copy of it, for access to it, or for a product or service
+     whose value comes entirely or mainly from it (including paid hosting,
+     installation, support or accounts built on it).
+
+  b. Clone the Software into another product. That means: use the Software,
+     its source code or any part of them to build, publish or offer another
+     app, product or service - under the name Piaz Switch or any other name,
+     changed or unchanged, alone or bundled with something else, and whether
+     it is paid for, free or paid for by advertising.
+
+  c. Give out copies. That means: distribute, publish, upload or host the
+     Software or a changed version of it, except as section 2(c) allows.
+     Linking to the Licensor's official pages is always welcome.
+
+  d. Remove or change any copyright, license or author notice in the
+     Software, or present the Software as your own work.
+
+  e. Use the names "Piaz Switch" and "Benpiaz", or the Software's logo and
+     icons, for anything other than referring to the Software itself.
+
+4. Changes you send to the Licensor
+
+If you send the Licensor a change to the Software (for example a pull
+request), you keep your copyright in it, and you give the Licensor a
+perpetual, worldwide, free, irrevocable permission to use, change, publish and
+license it as part of the Software, under this license or any other.
+
+5. Other people's work
+
+Parts of the Software come from other authors and stay under their own
+licenses, which are listed in THIRD_PARTY_NOTICES.md and in the license files
+of the packages the Software is built from. Nothing here takes away rights
+those licenses give you in those parts.
+
+6. When this permission ends
+
+This permission ends automatically if you break any of these terms. When it
+ends you must stop using the Software and delete your copies of it. The
+Licensor may give the permission back to you in writing.
+
+7. Anything else
+
+Every right not given to you here stays with the Licensor. If you want to do
+something these terms do not allow - sell it, bundle it, publish a version of
+your own - ask first at https://github.com/Benpiaz/piaz-switch/issues. It is
+allowed only once the Licensor has agreed in writing.
+
+8. No warranty
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+LICENSOR BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

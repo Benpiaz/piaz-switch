@@ -30,9 +30,9 @@
     "targets": ["app", "nsis"],
     "category": "DeveloperTool",
     "publisher": "Benpiaz",
-    "copyright": "Copyright (c) 2026 Benpiaz. MIT with the Commons Clause.",
+    "copyright": "Copyright (c) 2026 Benpiaz. Free to use, not for sale.",
     "homepage": "https://github.com/Benpiaz/piaz-switch",
-    "license": "LicenseRef-MIT-Commons-Clause",
+    "license": "LicenseRef-Piaz-Switch-1.0",
     "licenseFile": "../../LICENSE",
     "shortDescription": "Switch Claude Code and Codex accounts",
     "icon": [

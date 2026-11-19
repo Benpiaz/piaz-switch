@@ -10,7 +10,7 @@ click — without signing out — and see how much each account has left.**
 [![CI](https://github.com/Benpiaz/piaz-switch/actions/workflows/ci.yml/badge.svg)](https://github.com/Benpiaz/piaz-switch/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/Benpiaz/piaz-switch)](https://github.com/Benpiaz/piaz-switch/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/Benpiaz/piaz-switch/total)](https://github.com/Benpiaz/piaz-switch/releases)
-[![License: MIT + Commons Clause](https://img.shields.io/badge/license-MIT%20%2B%20Commons%20Clause-blue.svg)](LICENSE)
+[![License: free to use, not for sale](https://img.shields.io/badge/license-free%20to%20use%2C%20not%20for%20sale-blue.svg)](LICENSE)
 ![Windows | macOS](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-lightgrey)
 
 **[openvibecode.dev](https://openvibecode.dev)** · [**Download**](#download) · [What's new](CHANGELOG.md) · [How it works](#how-it-works) · [Use the app](#use-the-app) · [Command line](#use-the-command-line) · [Author](#author) · [Tiếng Việt](#tiếng-việt)
@@ -374,16 +374,21 @@ The same links are in the app, under **Settings → About** and in the tray menu
 
 ## License
 
-Piaz Switch is **free and source-available** under the [MIT license with the
-Commons Clause](LICENSE):
+Piaz Switch is **free to use** under the [Piaz Switch License](LICENSE). The
+source is public so you can read it, check it and build it yourself:
 
-- ✅ You may download, use (personally or at work), read, modify and share it, and
-  build on it — keeping the license notice.
-- ❌ You may **not sell** it: no selling the app, a modified copy, or a paid
-  product or service whose value comes mainly from it.
+- ✅ You may download, install and use it, personally or at work, at no cost.
+- ✅ You may read the source, build it and change it for your own use. Pull
+  requests are welcome.
+- ❌ You may **not sell** it: no selling or renting the app, a copy, a modified
+  copy, or a paid product or service whose value comes mainly from it.
+- ❌ You may **not clone it into another product**: no publishing it or a version
+  of it as your own app, renamed or not, paid or free.
+- ❌ You may not give out copies. Link to [openvibecode.dev](https://openvibecode.dev)
+  or to this repository instead.
 
-Because of that one condition it is not "open source" in the OSI sense. For any
-other arrangement, open an issue.
+So it is source-available, not "open source". For any other arrangement, open
+an issue.
 
 Piaz Switch is an independent project, not affiliated with or endorsed by Anthropic,
 OpenAI, Anysphere or Google. Claude and Claude Code are trademarks of Anthropic;
@@ -489,9 +494,12 @@ các công cụ (Claude Code, Codex…): đăng xuất sẽ huỷ luôn login m�
 - Khi chuyển tài khoản Cursor/Antigravity đang mở, app hỏi trước, đóng app đó, chuyển
   rồi mở lại. Hãy lưu file trước khi chuyển.
 
-**Giấy phép**: miễn phí, mã nguồn công khai (MIT + Commons Clause). Bạn được tải về,
-dùng (kể cả cho công việc), sửa và chia sẻ lại, nhưng **không được bán** app này
-hay bản sửa đổi của nó, hoặc dịch vụ thu phí dựa chủ yếu vào nó.
+**Giấy phép**: miễn phí để dùng, theo [Giấy phép Piaz Switch](LICENSE). Bạn được
+tải về, cài và dùng (kể cả cho công việc), đọc mã nguồn, tự build và sửa để dùng
+riêng. Bạn **không được bán** app này, bản sao hay bản sửa đổi của nó, hoặc dịch vụ
+thu phí dựa chủ yếu vào nó; **không được clone về để bán hay làm thành sản phẩm
+khác** (dù đổi tên, dù miễn phí); và không được phát tán lại bản sao, hãy dẫn link
+về [openvibecode.dev](https://openvibecode.dev) hoặc repo này.
 
 **Tác giả**: **Ben Piaz** — theo dõi kênh YouTube [@benpiaz](https://www.youtube.com/@benpiaz)
 và X [@benpiazai](https://x.com/benpiazai) để nhận bản mới và mẹo dùng.

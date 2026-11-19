@@ -5,7 +5,7 @@ members = ["crates/pitstop-core", "crates/pitstop-cli", "crates/pitstop-app"]
 [workspace.package]
 version = "0.6.2"
 edition = "2021"
-license = "LicenseRef-MIT-Commons-Clause"
+license = "LicenseRef-Piaz-Switch-1.0"
 repository = "https://github.com/Benpiaz/piaz-switch"
 
 [workspace.dependencies]
